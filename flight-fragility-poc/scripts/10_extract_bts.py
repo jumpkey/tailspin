@@ -43,8 +43,14 @@ log = logging.getLogger(__name__)
 # BTS TranStats field selection payload
 # Ref: https://www.transtats.bts.gov/DL_SelectFields.aspx?gnoyr_VQ=FGJ&QO_fu146_anzr=b0-gvzr
 # ---------------------------------------------------------------------------
-BTS_BASE_URL = "https://www.transtats.bts.gov"
-BTS_DL_URL = f"{BTS_BASE_URL}/DownLoad_Table.asp"
+# BTS pre-built monthly ZIP files — no session/ViewState required.
+# The form-based DownLoad_Table.asp endpoint requires ASP.NET ViewState tokens
+# that were not being obtained, causing silent failures. The PREZIP archive is
+# the authoritative, publicly accessible source with the same data.
+BTS_PREZIP_URL = (
+    "https://transtats.bts.gov/PREZIP/"
+    "On_Time_Reporting_Carrier_On_Time_Performance_1987_present_{year}_{month}.zip"
+)
 
 BTS_REQUIRED_FIELDS = [
     "FlightDate",
@@ -66,28 +72,6 @@ BTS_REQUIRED_FIELDS = [
     "ActualElapsedTime",
     "CRSElapsedTime",
 ]
-
-# BTS field-code mapping (numeric IDs needed by the download form)
-BTS_FIELD_CODES = {
-    "FlightDate": "10",
-    "Reporting_Airline": "16",
-    "Operating_Airline": "19",
-    "Flight_Number_Reporting_Airline": "20",
-    "Origin": "23",
-    "Dest": "28",
-    "CRSDepTime": "30",
-    "DepTime": "31",
-    "CRSArrTime": "40",
-    "ArrTime": "41",
-    "DepDelay": "32",
-    "ArrDelay": "42",
-    "Cancelled": "47",
-    "CancellationCode": "48",
-    "Diverted": "49",
-    "Distance": "51",
-    "ActualElapsedTime": "50",
-    "CRSElapsedTime": "45",
-}
 
 # Staging column rename map: BTS name → normalized name
 BTS_RENAME = {
@@ -158,68 +142,41 @@ def checksum(path: Path) -> str:
 
 def fetch_bts_month(year: int, month: int, airports: set, session: requests.Session) -> pd.DataFrame:
     """
-    Attempt a direct HTTP POST to the BTS TranStats download endpoint.
-    Returns a DataFrame of raw rows filtered to the airport universe.
+    Download a BTS pre-built monthly ZIP and filter to the airport universe.
 
-    BTS TranStats uses a form-based download. We POST the field selection
-    with year/month parameters and parse the returned ZIP or CSV.
+    The PREZIP archive requires no session tokens or form field IDs — it is a
+    stable direct-download URL that returns the full monthly on-time table.
+    Each file is ~27 MB; we stream it and filter immediately to keep memory low.
     """
-    log.info(f"  Fetching BTS data for {year}-{month:02d} ...")
+    import zipfile
 
-    # Build form payload matching TranStats download form structure
-    field_list = ",".join(BTS_FIELD_CODES[f] for f in BTS_REQUIRED_FIELDS)
-    payload = {
-        "UserTableName": "On_Time_Reporting_Carrier_On_Time_Performance_1987_present",
-        "DBShortName": "On_Time",
-        "RawDataTable": "T_ONTIME_REPORTING",
-        "sqlstr": (
-            f"SELECT {','.join(BTS_REQUIRED_FIELDS)} "
-            f"FROM T_ONTIME_REPORTING "
-            f"WHERE YEAR={year} AND MONTH={month}"
-        ),
-        "varlist": field_list,
-        "grouplist": "",
-        "suml": "",
-        "sumRegion": "",
-        "filter1": "title=",
-        "filter2": "title=",
-        "geo": "All",
-        "time": f"{year}/{month}",
-        "timename": "FlightDate",
-        "GEOGRAPHY": "All",
-        "XYEAR": str(year),
-        "FREQUENCY": str(month),
-        "VarDesc": "FlightDate",
-        "VarType": "Num",
-        "VarDesc2": "",
-        "VarType2": "",
-        "Category": "On-time",
-        "Submit": "Download",
-    }
+    url = BTS_PREZIP_URL.format(year=year, month=month)
+    log.info(f"  Downloading BTS PREZIP for {year}-{month:02d} ...")
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; FlightFragilityPOC/1.0; +https://github.com/jumpkey/tailspin)",
-        "Referer": "https://www.transtats.bts.gov/DL_SelectFields.aspx",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    }
-
-    resp = session.post(BTS_DL_URL, data=payload, headers=headers, timeout=120)
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; FlightFragilityPOC/1.0)"}
+    resp = session.get(url, headers=headers, timeout=300, stream=True)
     resp.raise_for_status()
 
-    content_type = resp.headers.get("Content-Type", "")
-    if "zip" in content_type or resp.content[:2] == b"PK":
-        import zipfile
-        zf = zipfile.ZipFile(io.BytesIO(resp.content))
-        csv_name = next(n for n in zf.namelist() if n.endswith(".csv"))
-        raw = pd.read_csv(zf.open(csv_name), dtype=str)
-    else:
-        raw = pd.read_csv(io.StringIO(resp.text), dtype=str)
+    buf = io.BytesIO()
+    downloaded = 0
+    for chunk in resp.iter_content(chunk_size=131072):
+        buf.write(chunk)
+        downloaded += len(chunk)
+    log.info(f"  Received {downloaded / 1e6:.1f} MB")
+    buf.seek(0)
 
-    # Filter to our airport universe (origin or destination)
-    if airports:
+    with zipfile.ZipFile(buf) as zf:
+        csv_names = [n for n in zf.namelist() if n.endswith(".csv")]
+        if not csv_names:
+            raise ValueError(f"No CSV found in PREZIP for {year}-{month:02d}")
+        raw = pd.read_csv(zf.open(csv_names[0]), dtype=str, low_memory=False)
+
+    # Filter immediately to our airport universe to reduce memory pressure
+    if airports and not raw.empty:
         mask = raw["Origin"].isin(airports) | raw["Dest"].isin(airports)
         raw = raw[mask].copy()
 
+    log.info(f"  {len(raw):,} rows after airport filter")
     return raw
 
 

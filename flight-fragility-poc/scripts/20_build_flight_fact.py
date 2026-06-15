@@ -1,16 +1,32 @@
 #!/usr/bin/env python3
 """
-20_build_flight_fact.py — Integrate BTS and FAA staging data into a single curated flight fact table.
+20_build_flight_fact.py — Integrate BTS and NOAA weather into a flight fact table.
 
 Steps
 -----
-1. Load and standardize BTS and FAA staging files.
+1. Load and standardize BTS and NOAA hourly weather staging files.
 2. Assign market baskets (AA regional, UA peer, DL peer) to each flight.
-3. Join FAA cancelled-flight-weather records onto BTS records by
-   flight_date / carrier_code / flight_number / origin / dest /
-   sched_dep within ±15 min.
-4. Derive weather_bucket, severe_delay_flag, operated_flag, period_flag.
-5. Write curated fact table and QA summary.
+3. Convert each BTS flight's scheduled departure and arrival local times to UTC.
+4. Join NOAA hourly weather onto BTS by (airport, UTC date, UTC hour):
+   - Departure weather  : origin airport + departure UTC hour
+   - Arrival weather    : dest airport   + arrival UTC hour
+5. Derive weather_bucket = worst of departure + arrival conditions.
+6. Derive severe_delay_flag, operated_flag, period_flag.
+7. Write curated fact table and QA summary.
+
+WHY THIS REPLACES THE ORIGINAL JOIN LOGIC
+------------------------------------------
+The original join matched FAA ASPM (cancelled-flights-only) records to BTS by
+flight number. Because FAA data only covers cancellations, all operated
+(non-cancelled) flights received null weather columns and fell through to the
+text-keyword fallback, which returned "benign" for null inputs. This forced
+every operated flight into the benign bucket, making adverse/marginal buckets
+contain only cancelled flights — a cancellation_rate of ≈ 1.0 by construction
+and useless for cross-carrier comparison.
+
+The NOAA ASOS approach assigns weather to every flight at its actual departure
+and arrival airport-hours, giving the analysis meaningful denominators (all
+scheduled flights during adverse/marginal conditions, not just the cancelled ones).
 
 Outputs
 -------
@@ -27,7 +43,9 @@ python scripts/20_build_flight_fact.py \\
 import argparse
 import json
 import logging
+from datetime import datetime, date, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import numpy as np
 import pandas as pd
@@ -41,79 +59,80 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Weather-bucket derivation
+# Airport timezone mapping (same as 11_extract_faa_weather.py)
 # ---------------------------------------------------------------------------
-# Primary approach: FAA ASPM severity levels (None, Minor, Moderate, Severe)
-#   benign   — both endpoints ≤ Minor
-#   marginal — one endpoint is Moderate
-#   adverse  — one/both endpoints are Severe OR both are ≥ Moderate
-#
-# Fallback (raw text descriptors):
-#   adverse  — fog, thunderstorm, very low vis/ceiling
-#   marginal — rain, mist, reduced vis/ceiling
-#   benign   — otherwise
+AIRPORT_TZ_NAMES = {
+    "LFT": "America/Chicago",
+    "BTR": "America/Chicago",
+    "AEX": "America/Chicago",
+    "MLU": "America/Chicago",
+    "GPT": "America/Chicago",
+    "SHV": "America/Chicago",
+    "DFW": "America/Chicago",
+    "IAH": "America/Chicago",
+    "ATL": "America/New_York",
+}
 
-ASPM_RANK = {"None": 0, "Minor": 1, "Moderate": 2, "Severe": 3}
+# Pre-load ZoneInfo objects (one per unique timezone)
+_TZ_CACHE: dict[str, ZoneInfo] = {}
 
-ADVERSE_KEYWORDS = frozenset(
-    ["fog", "ts", "thunderstorm", "fzra", "blizzard", "heavy snow", "+sn"]
-)
-MARGINAL_KEYWORDS = frozenset(
-    ["ra", "rain", "mist", "br", "-ra", "sn", "snow", "drizzle", "dz"]
-)
+def _get_tz(tz_name: str) -> ZoneInfo:
+    if tz_name not in _TZ_CACHE:
+        try:
+            _TZ_CACHE[tz_name] = ZoneInfo(tz_name)
+        except ZoneInfoNotFoundError:
+            _TZ_CACHE[tz_name] = ZoneInfo("America/Chicago")
+    return _TZ_CACHE[tz_name]
 
+UTC = ZoneInfo("UTC")
 
-def _aspm_bucket(dep_level: str | None, arr_level: str | None) -> str:
-    """Derive weather bucket from FAA ASPM severity strings."""
-    d = ASPM_RANK.get(str(dep_level).strip().title(), -1)
-    a = ASPM_RANK.get(str(arr_level).strip().title(), -1)
-    if d == -1 and a == -1:
-        return "unknown"
-    d = max(d, 0)
-    a = max(a, 0)
-    hi = max(d, a)
-    lo = min(d, a)
-    if hi >= 3:  # one is Severe
-        return "adverse"
-    if hi == 2 and lo == 2:  # both Moderate
-        return "adverse"
-    if hi == 2:  # one Moderate
-        return "marginal"
-    return "benign"  # both ≤ Minor
+# ---------------------------------------------------------------------------
+# Weather bucket severity ordering
+# ---------------------------------------------------------------------------
+BUCKET_RANK = {"adverse": 2, "marginal": 1, "benign": 0, "unknown": -1}
+RANK_BUCKET = {v: k for k, v in BUCKET_RANK.items()}
 
 
-def _text_bucket(dep_wx: str | None, arr_wx: str | None) -> str:
-    """Derive weather bucket from raw weather-condition strings."""
-    text = f"{dep_wx or ''} {arr_wx or ''}".lower()
-    if any(k in text for k in ADVERSE_KEYWORDS):
-        return "adverse"
-    if any(k in text for k in MARGINAL_KEYWORDS):
-        return "marginal"
-    return "benign"
+def _worst_bucket(b1: str, b2: str) -> str:
+    r1 = BUCKET_RANK.get(b1, -1)
+    r2 = BUCKET_RANK.get(b2, -1)
+    worst_rank = max(r1, r2)
+    return RANK_BUCKET.get(worst_rank, "benign")
 
 
-def derive_weather_bucket(row: pd.Series) -> str:
+# ---------------------------------------------------------------------------
+# Local HHMM → UTC conversion
+# ---------------------------------------------------------------------------
+
+def _hhmm_to_utc(flight_date: date, hhmm_str: str, airport: str) -> tuple[date, int]:
     """
-    Use FAA ASPM levels when available; fall back to raw weather text.
-    ASPM levels are expected in columns faa_dep_ceiling / faa_arr_ceiling
-    (which may carry ASPM verbal severity if sourced from the Weather Factors
-    report), otherwise use dep_local_weather / arr_local_weather text.
+    Convert a BTS HHMM local time + flight_date to a (UTC date, UTC hour) pair.
+
+    BTS reports scheduled times in local airport time without a DST flag.
+    We use Python's zoneinfo module which handles DST transitions correctly.
+    Returns (utc_date, utc_hour).
     """
-    # Try ASPM level columns if present
-    dep_lvl = row.get("faa_dep_aspm_level") or row.get("faa_dep_ceiling")
-    arr_lvl = row.get("faa_arr_aspm_level") or row.get("faa_arr_ceiling")
+    try:
+        hhmm = str(hhmm_str).strip().zfill(4)
+        h = int(hhmm[:2])
+        m = int(hhmm[2:4])
+        # Handle BTS "2400" (midnight of next day)
+        if h == 24:
+            h = 0
+            flight_date = flight_date + timedelta(days=1)
+        h = min(h, 23)  # clamp any other out-of-range values
+        tz_name = AIRPORT_TZ_NAMES.get(airport, "America/Chicago")
+        tz = _get_tz(tz_name)
+        local_dt = datetime(flight_date.year, flight_date.month, flight_date.day, h, m, tzinfo=tz)
+        utc_dt = local_dt.astimezone(UTC)
+        return utc_dt.date(), utc_dt.hour
+    except Exception:
+        return flight_date, int(str(hhmm_str).strip().zfill(4)[:2]) if hhmm_str else 0
 
-    if pd.notna(dep_lvl) or pd.notna(arr_lvl):
-        bucket = _aspm_bucket(dep_lvl, arr_lvl)
-        if bucket != "unknown":
-            return bucket
 
-    # Fallback to raw text
-    return _text_bucket(
-        row.get("faa_dep_local_weather"),
-        row.get("faa_arr_local_weather"),
-    )
-
+# ---------------------------------------------------------------------------
+# Config and data loaders
+# ---------------------------------------------------------------------------
 
 def load_config(routes_path: Path, study_path: Path):
     with open(routes_path) as f:
@@ -124,19 +143,9 @@ def load_config(routes_path: Path, study_path: Path):
 
 
 def build_basket_lookup(routes: dict) -> dict[tuple, str]:
-    """
-    Return a mapping (origin, dest, carrier_prefix) → basket_name.
-    We use the hub destination to infer which basket a flight belongs to.
-    """
     lookup: dict[tuple, str] = {}
-    basket_carrier = {
-        "aa_regional_basket": "AA",
-        "ua_peer_basket": "UA",
-        "dl_peer_basket": "DL",
-    }
-    for basket_name, carrier in basket_carrier.items():
-        legs = routes.get(basket_name, [])
-        for leg in legs:
+    for basket_name in ("aa_regional_basket", "ua_peer_basket", "dl_peer_basket"):
+        for leg in routes.get(basket_name, []):
             lookup[(leg["origin"], leg["dest"])] = basket_name
     return lookup
 
@@ -146,13 +155,9 @@ def assign_basket(row: pd.Series, basket_lookup: dict[tuple, str]) -> str:
 
 
 def assign_carrier_group(basket: str) -> str:
-    if basket == "aa_regional_basket":
-        return "AA_regional"
-    if basket == "ua_peer_basket":
-        return "UA_peer"
-    if basket == "dl_peer_basket":
-        return "DL_peer"
-    return "other"
+    return {"aa_regional_basket": "AA_regional",
+            "ua_peer_basket": "UA_peer",
+            "dl_peer_basket": "DL_peer"}.get(basket, "other")
 
 
 def load_bts(path: Path) -> pd.DataFrame:
@@ -174,129 +179,177 @@ def load_bts(path: Path) -> pd.DataFrame:
     return df
 
 
-def load_faa(path: Path) -> pd.DataFrame:
-    log.info(f"Loading FAA staging: {path}")
+def load_weather(path: Path) -> pd.DataFrame:
+    """Load the NOAA ASOS hourly staging produced by 11_extract_faa_weather.py."""
+    log.info(f"Loading NOAA weather staging: {path}")
     if not path.exists():
-        log.warning("  FAA staging file not found — proceeding without weather join.")
+        log.warning("  Weather staging file not found — all flights will get 'benign' bucket.")
         return pd.DataFrame()
     df = pd.read_csv(path, dtype=str)
-    if "scheduled_departure_date" in df.columns:
-        df["scheduled_departure_date"] = pd.to_datetime(
-            df["scheduled_departure_date"], errors="coerce"
-        )
-    if "scheduled_departure_time" in df.columns:
-        df["scheduled_departure_time"] = df["scheduled_departure_time"].astype(str).str.zfill(4)
-    log.info(f"  FAA rows: {len(df):,}")
+    df["obs_hour_utc"] = pd.to_numeric(df["obs_hour_utc"], errors="coerce").astype("Int64")
+    for col in ("visibility_sm", "ceiling_ft", "wind_kt"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    log.info(f"  Weather rows: {len(df):,}")
     return df
 
 
-def join_faa_weather(bts: pd.DataFrame, faa: pd.DataFrame, tolerance_min: int = 15) -> pd.DataFrame:
+# ---------------------------------------------------------------------------
+# Weather join: BTS flight → NOAA airport-hour
+# ---------------------------------------------------------------------------
+
+def _add_utc_keys(bts: pd.DataFrame) -> pd.DataFrame:
     """
-    Left-join FAA weather records onto BTS cancelled flights.
-
-    Join keys: flight_date, carrier_code, flight_number, origin, dest
-    Time tolerance: scheduled departure within ±tolerance_min minutes.
+    Vectorized conversion of BTS local scheduled times to (UTC date, UTC hour).
+    Adds columns:
+        dep_utc_date, dep_utc_hour, arr_utc_date, arr_utc_hour
     """
-    if faa.empty:
-        # Add empty FAA columns
-        for col in (
-            "faa_dep_wind", "faa_dep_ceiling", "faa_dep_visibility",
-            "faa_dep_nearby_ts", "faa_dep_local_weather",
-            "faa_arr_wind", "faa_arr_ceiling", "faa_arr_visibility",
-            "faa_arr_nearby_ts", "faa_arr_local_weather",
-        ):
-            bts[col] = np.nan
-        return bts
+    log.info("  Converting BTS local times to UTC ...")
+    dep_dates, dep_hours = [], []
+    arr_dates, arr_hours = [], []
 
-    # Prepare FAA side — rename to avoid collision
-    faa_join = faa.rename(columns={
-        "scheduled_departure_date": "faa_date",
-        "carrier_code": "faa_carrier",
-        "flight_number": "faa_fnum",
-        "departure_airport": "faa_origin",
-        "arrival_airport": "faa_dest",
-        "scheduled_departure_time": "faa_sched_dep",
-        "dep_wind": "faa_dep_wind",
-        "dep_ceiling": "faa_dep_ceiling",
-        "dep_visibility": "faa_dep_visibility",
-        "dep_nearby_ts": "faa_dep_nearby_ts",
-        "dep_local_weather": "faa_dep_local_weather",
-        "arr_wind": "faa_arr_wind",
-        "arr_ceiling": "faa_arr_ceiling",
-        "arr_visibility": "faa_arr_visibility",
-        "arr_nearby_ts": "faa_arr_nearby_ts",
-        "arr_local_weather": "faa_arr_local_weather",
-    })
+    for _, row in bts.iterrows():
+        fd = row["flight_date"].date() if pd.notna(row["flight_date"]) else date.today()
+        origin = str(row.get("origin", "")).strip().upper()
+        dest = str(row.get("dest", "")).strip().upper()
 
-    # Convert times to minutes-since-midnight for tolerance join
-    def to_minutes(t: pd.Series) -> pd.Series:
-        t_str = t.astype(str).str.zfill(4)
-        h = pd.to_numeric(t_str.str[:2], errors="coerce")
-        m = pd.to_numeric(t_str.str[2:4], errors="coerce")
-        return h * 60 + m
+        d_date, d_hour = _hhmm_to_utc(fd, row.get("sched_dep_local", "0000"), origin)
+        dep_dates.append(str(d_date))
+        dep_hours.append(d_hour)
+
+        # For arrival, add scheduled elapsed minutes to departure UTC datetime
+        elapsed = row.get("scheduled_elapsed_min")
+        try:
+            elapsed = float(elapsed)
+        except (TypeError, ValueError):
+            elapsed = None
+
+        if elapsed is not None and elapsed > 0:
+            dep_tz = _get_tz(AIRPORT_TZ_NAMES.get(origin, "America/Chicago"))
+            hhmm = str(row.get("sched_dep_local", "0000")).strip().zfill(4)
+            h = min(int(hhmm[:2]), 23)
+            m = int(hhmm[2:4]) if hhmm[2:4].isdigit() else 0
+            try:
+                local_dep = datetime(fd.year, fd.month, fd.day, h, m, tzinfo=dep_tz)
+                from datetime import timedelta as _td
+                utc_arr = local_dep.astimezone(UTC) + _td(minutes=elapsed)
+                arr_dates.append(str(utc_arr.date()))
+                arr_hours.append(utc_arr.hour)
+            except Exception:
+                arr_dates.append(str(d_date))
+                arr_hours.append((d_hour + 2) % 24)
+        else:
+            # Fall back: use arrival local time
+            a_date, a_hour = _hhmm_to_utc(fd, row.get("sched_arr_local", "0000"), dest)
+            # If arrival appears before departure, assume next-day arrival
+            if (a_date, a_hour) < (d_date, d_hour):
+                from datetime import timedelta as _td
+                a_date = (datetime.combine(a_date, datetime.min.time()) + _td(days=1)).date()
+            arr_dates.append(str(a_date))
+            arr_hours.append(a_hour)
 
     bts = bts.copy()
-    bts["_dep_min"] = to_minutes(bts.get("sched_dep_local", pd.Series(dtype=str)))
-    faa_join["_faa_dep_min"] = to_minutes(faa_join.get("faa_sched_dep", pd.Series(dtype=str)))
+    bts["dep_utc_date"] = dep_dates
+    bts["dep_utc_hour"] = dep_hours
+    bts["arr_utc_date"] = arr_dates
+    bts["arr_utc_hour"] = arr_hours
+    return bts
 
-    # Merge on date + carrier + flight number + origin + dest
+
+def join_weather(bts: pd.DataFrame, wx: pd.DataFrame) -> pd.DataFrame:
+    """
+    Left-join NOAA hourly weather onto BTS flights.
+
+    For each flight we look up:
+      1. Departure weather: origin airport, dep_utc_date, dep_utc_hour
+      2. Arrival weather:   dest airport, arr_utc_date, arr_utc_hour
+    Then combine to a single flight weather_bucket (worst of two).
+    """
+    if wx.empty:
+        log.warning("  No weather data — all flights assigned 'benign' bucket.")
+        for col in ("wx_dep_visibility", "wx_dep_ceiling", "wx_dep_wxcodes",
+                    "wx_dep_wind_kt", "wx_dep_bucket",
+                    "wx_arr_visibility", "wx_arr_ceiling", "wx_arr_wxcodes",
+                    "wx_arr_wind_kt", "wx_arr_bucket"):
+            bts[col] = np.nan
+        bts["weather_bucket"] = "benign"
+        return bts
+
+    # Build lookup dict: (airport, date_str, hour_int) → row
+    wx_dep = wx[["airport_code", "obs_date_utc", "obs_hour_utc",
+                 "visibility_sm", "ceiling_ft", "wxcodes", "wind_kt", "weather_bucket"]].copy()
+    wx_dep.columns = ["airport_code", "obs_date_utc", "obs_hour_utc",
+                      "wx_dep_visibility", "wx_dep_ceiling", "wx_dep_wxcodes",
+                      "wx_dep_wind_kt", "wx_dep_bucket"]
+
+    wx_arr = wx[["airport_code", "obs_date_utc", "obs_hour_utc",
+                 "visibility_sm", "ceiling_ft", "wxcodes", "wind_kt", "weather_bucket"]].copy()
+    wx_arr.columns = ["airport_code", "obs_date_utc", "obs_hour_utc",
+                      "wx_arr_visibility", "wx_arr_ceiling", "wx_arr_wxcodes",
+                      "wx_arr_wind_kt", "wx_arr_bucket"]
+
+    bts = bts.copy()
+    bts["dep_utc_hour"] = bts["dep_utc_hour"].astype("Int64")
+    bts["arr_utc_hour"] = bts["arr_utc_hour"].astype("Int64")
+
+    # Merge departure weather
     merged = bts.merge(
-        faa_join,
-        left_on=["flight_date", "carrier_code", "flight_number", "origin", "dest"],
-        right_on=["faa_date", "faa_carrier", "faa_fnum", "faa_origin", "faa_dest"],
+        wx_dep,
+        left_on=["origin", "dep_utc_date", "dep_utc_hour"],
+        right_on=["airport_code", "obs_date_utc", "obs_hour_utc"],
         how="left",
+    ).drop(columns=["airport_code", "obs_date_utc", "obs_hour_utc"], errors="ignore")
+
+    # Merge arrival weather
+    merged = merged.merge(
+        wx_arr,
+        left_on=["dest", "arr_utc_date", "arr_utc_hour"],
+        right_on=["airport_code", "obs_date_utc", "obs_hour_utc"],
+        how="left",
+    ).drop(columns=["airport_code", "obs_date_utc", "obs_hour_utc"], errors="ignore")
+
+    # Combine departure + arrival into flight-level weather bucket
+    merged["weather_bucket"] = merged.apply(
+        lambda r: _worst_bucket(
+            r.get("wx_dep_bucket") or "benign",
+            r.get("wx_arr_bucket") or "benign",
+        ),
+        axis=1,
     )
 
-    # Apply time tolerance: drop matches that are outside the window
-    dep_diff = (merged["_dep_min"] - merged["_faa_dep_min"]).abs()
-    bad_time = dep_diff > tolerance_min
-    faa_weather_cols = [c for c in merged.columns if c.startswith("faa_") and c not in
-                        ("faa_date", "faa_carrier", "faa_fnum", "faa_origin", "faa_dest", "faa_sched_dep", "_faa_dep_min")]
-    merged.loc[bad_time, faa_weather_cols] = np.nan
+    dep_matched = merged["wx_dep_bucket"].notna().sum()
+    arr_matched = merged["wx_arr_bucket"].notna().sum()
+    total = len(merged)
+    log.info(f"  Departure weather matched: {dep_matched:,}/{total:,} ({dep_matched/total:.1%})")
+    log.info(f"  Arrival weather matched:   {arr_matched:,}/{total:,} ({arr_matched/total:.1%})")
 
-    # Drop helper columns
-    drop_cols = [c for c in ("_dep_min", "_faa_dep_min", "faa_date", "faa_carrier",
-                              "faa_fnum", "faa_origin", "faa_dest", "faa_sched_dep")
-                 if c in merged.columns]
-    merged = merged.drop(columns=drop_cols)
-
-    # Deduplicate (one BTS row may match multiple FAA rows — keep first)
-    key_cols = [c for c in ("flight_date", "carrier_code", "flight_number", "origin", "dest")
-                if c in merged.columns]
-    merged = merged.drop_duplicates(subset=key_cols, keep="first")
-
-    join_count = merged[faa_weather_cols[0]].notna().sum() if faa_weather_cols else 0
-    cancel_count = (merged.get("cancelled_flag", pd.Series(0)) == 1).sum()
-    log.info(
-        f"  FAA join: {join_count:,} / {cancel_count:,} cancelled flights matched "
-        f"({join_count / max(cancel_count, 1):.1%} match rate)"
-    )
     return merged
 
 
+# ---------------------------------------------------------------------------
+# Analytic flag derivation
+# ---------------------------------------------------------------------------
+
 def derive_flags(df: pd.DataFrame, study: dict) -> pd.DataFrame:
-    """Derive weather_bucket, severe_delay_flag, operated_flag, period_flag, year_month, route_key."""
+    """Derive severe_delay_flag, operated_flag, period_flag, year_month, route_key."""
     delay_thresh = study.get("delay_threshold_minutes", 60)
     baseline_end = pd.to_datetime(study["baseline_end"])
 
     df = df.copy()
 
-    # weather_bucket
-    df["weather_bucket"] = df.apply(derive_weather_bucket, axis=1)
-
-    # severe_delay_flag: operated flight with arrival delay ≥ threshold
+    # severe_delay_flag: operated and arrived ≥ threshold late
     df["severe_delay_flag"] = (
         (df.get("arr_delay_min", pd.Series(np.nan)) >= delay_thresh) &
         (df.get("cancelled_flag", pd.Series(0)) == 0)
     ).astype(int)
 
-    # operated_flag
+    # operated_flag: not cancelled and not diverted
     df["operated_flag"] = (
         (df.get("cancelled_flag", pd.Series(0)) == 0) &
         (df.get("diverted_flag", pd.Series(0)) == 0)
     ).astype(int)
 
-    # period_flag: baseline vs recent
+    # period_flag
     df["period_flag"] = np.where(
         df["flight_date"] <= baseline_end, "baseline", "recent"
     )
@@ -310,13 +363,16 @@ def derive_flags(df: pd.DataFrame, study: dict) -> pd.DataFrame:
     return df
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main():
     parser = argparse.ArgumentParser(description="Build integrated flight fact table")
     parser.add_argument("--routes", default="config/routes.yaml")
     parser.add_argument("--study", default="config/study.yaml")
     parser.add_argument("--bts", default="data/staging/bts_flights.csv")
-    parser.add_argument("--faa", default="data/staging/faa_cancel_weather.csv")
-    parser.add_argument("--fa", default="data/staging/flightaware_history.csv")
+    parser.add_argument("--weather", default="data/staging/airport_weather_hourly.csv")
     parser.add_argument("--out", default="data/curated/flight_operability_fact.csv")
     parser.add_argument("--qa-out", default="output/qa_summary.csv")
     args = parser.parse_args()
@@ -326,7 +382,7 @@ def main():
     routes_path = root / args.routes
     study_path = root / args.study
     bts_path = root / args.bts
-    faa_path = root / args.faa
+    weather_path = root / args.weather
     out_path = root / args.out
     qa_path = root / args.qa_out
 
@@ -337,37 +393,45 @@ def main():
     basket_lookup = build_basket_lookup(routes)
 
     bts = load_bts(bts_path)
-    faa = load_faa(faa_path)
+    wx = load_weather(weather_path)
 
     # Filter BTS to our route universe
     known_routes = set(basket_lookup.keys())
     bts = bts[bts.apply(lambda r: (r.get("origin"), r.get("dest")) in known_routes, axis=1)].copy()
     log.info(f"BTS after route filter: {len(bts):,} rows")
 
+    if bts.empty:
+        log.error("No BTS flights in the configured route universe. Check routes.yaml.")
+        raise SystemExit(1)
+
     # Assign baskets
     bts["market_bucket"] = bts.apply(lambda r: assign_basket(r, basket_lookup), axis=1)
     bts["carrier_group"] = bts["market_bucket"].map(assign_carrier_group)
 
-    # Join FAA weather
-    fact = join_faa_weather(bts, faa)
+    # Convert BTS local times to UTC keys for weather join
+    bts = _add_utc_keys(bts)
+
+    # Join NOAA weather
+    fact = join_weather(bts, wx)
 
     # Derive flags
     fact = derive_flags(fact, study)
 
-    # Enforce required column order (pad any missing)
+    # Enforce required column order
     required_cols = [
         "flight_date", "year_month", "carrier_group", "carrier_code", "operating_carrier",
         "flight_number", "origin", "dest", "route_key", "sched_dep_local", "sched_arr_local",
         "dep_delay_min", "arr_delay_min", "cancelled_flag", "diverted_flag", "distance_miles",
-        "cancellation_code_bts", "faa_dep_wind", "faa_dep_ceiling", "faa_dep_visibility",
-        "faa_dep_nearby_ts", "faa_dep_local_weather", "faa_arr_wind", "faa_arr_ceiling",
-        "faa_arr_visibility", "faa_arr_nearby_ts", "faa_arr_local_weather", "weather_bucket",
-        "market_bucket", "period_flag", "severe_delay_flag", "operated_flag",
+        "cancellation_code_bts",
+        "wx_dep_visibility", "wx_dep_ceiling", "wx_dep_wxcodes", "wx_dep_wind_kt", "wx_dep_bucket",
+        "wx_arr_visibility", "wx_arr_ceiling", "wx_arr_wxcodes", "wx_arr_wind_kt", "wx_arr_bucket",
+        "weather_bucket", "market_bucket", "period_flag", "severe_delay_flag", "operated_flag",
     ]
     for col in required_cols:
         if col not in fact.columns:
             fact[col] = np.nan
-    fact = fact[required_cols + [c for c in fact.columns if c not in required_cols]]
+    extra_cols = [c for c in fact.columns if c not in required_cols]
+    fact = fact[required_cols + extra_cols]
 
     fact.to_csv(out_path, index=False)
     log.info(f"Fact table written: {out_path}  ({len(fact):,} rows)")
@@ -378,42 +442,35 @@ def main():
     qa_rows = []
 
     # Row counts by month
-    if "year_month" in fact.columns and "flight_date" in fact.columns:
+    if "year_month" in fact.columns:
         month_counts = fact.groupby("year_month").size().reset_index(name="row_count")
         month_counts["check"] = "bts_rows_by_month"
         qa_rows.append(month_counts.rename(columns={"year_month": "dimension"}))
 
-    # Row counts by route pair (FAA)
-    if not faa.empty and "departure_airport" in faa.columns:
-        faa_counts = (
-            faa.groupby(["departure_airport", "arrival_airport"]).size()
-            .reset_index(name="row_count")
-        )
-        faa_counts["dimension"] = faa_counts["departure_airport"] + "-" + faa_counts["arrival_airport"]
-        faa_counts["check"] = "faa_rows_by_route"
-        qa_rows.append(faa_counts[["dimension", "row_count", "check"]])
+    # Weather join match rates
+    dep_matched = fact["wx_dep_bucket"].notna().sum()
+    arr_matched = fact["wx_arr_bucket"].notna().sum()
+    total = len(fact)
+    qa_rows.append(pd.DataFrame([
+        {"dimension": "total_flights", "row_count": total, "check": "weather_join"},
+        {"dimension": "dep_wx_matched", "row_count": dep_matched, "check": "weather_join"},
+        {"dimension": "arr_wx_matched", "row_count": arr_matched, "check": "weather_join"},
+        {"dimension": "dep_match_rate", "row_count": round(dep_matched / max(total, 1), 4), "check": "weather_join"},
+        {"dimension": "arr_match_rate", "row_count": round(arr_matched / max(total, 1), 4), "check": "weather_join"},
+    ]))
 
-    # FAA join rate
+    # Cancellation stats
     cancel_total = (fact.get("cancelled_flag", pd.Series(0)) == 1).sum()
-    faa_matched = (
-        fact.get("faa_dep_local_weather", pd.Series(dtype=str)).notna().sum()
-        if "faa_dep_local_weather" in fact.columns else 0
-    )
-    qa_rows.append(pd.DataFrame([{
-        "dimension": "cancelled_flights",
-        "row_count": cancel_total,
-        "check": "faa_join_total_cancelled",
-    }, {
-        "dimension": "faa_matched",
-        "row_count": faa_matched,
-        "check": "faa_join_matched",
-    }, {
-        "dimension": "faa_join_rate",
-        "row_count": round(faa_matched / max(cancel_total, 1), 4),
-        "check": "faa_join_rate",
-    }]))
+    weather_cancel = fact[
+        (fact.get("cancelled_flag", pd.Series(0)) == 1) &
+        (fact.get("cancellation_code_bts", pd.Series("")) == "B")
+    ].shape[0]
+    qa_rows.append(pd.DataFrame([
+        {"dimension": "total_cancellations", "row_count": cancel_total, "check": "cancellation_qa"},
+        {"dimension": "weather_cancellations_bts_code_B", "row_count": weather_cancel, "check": "cancellation_qa"},
+    ]))
 
-    # Null rate on weather_bucket
+    # Weather bucket null rate
     wb_null = fact["weather_bucket"].isna().mean() if "weather_bucket" in fact.columns else 1.0
     qa_rows.append(pd.DataFrame([{
         "dimension": "weather_bucket",
@@ -421,7 +478,7 @@ def main():
         "check": "null_rate",
     }]))
 
-    # Sample size by market_bucket × weather_bucket × period_flag
+    # Sample size by market × weather × period
     if all(c in fact.columns for c in ("market_bucket", "weather_bucket", "period_flag")):
         sample_sz = (
             fact.groupby(["market_bucket", "weather_bucket", "period_flag"])
@@ -438,13 +495,13 @@ def main():
     log.info(f"QA summary written: {qa_path}")
 
     # Console summary
-    log.info("=== Fact Table QA ===")
-    log.info(f"  Total rows: {len(fact):,}")
+    log.info("=== Fact Table Summary ===")
+    log.info(f"  Total flights:      {len(fact):,}")
+    log.info(f"  Total cancellations:{cancel_total:,} ({cancel_total/max(len(fact),1):.2%})")
     if "market_bucket" in fact.columns:
         log.info(f"  Market buckets: {fact['market_bucket'].value_counts().to_dict()}")
     if "weather_bucket" in fact.columns:
         log.info(f"  Weather buckets: {fact['weather_bucket'].value_counts().to_dict()}")
-    log.info(f"  FAA join rate: {faa_matched}/{cancel_total} = {faa_matched/max(cancel_total,1):.1%}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,3 @@
+Tailspin - assorted ad-hoc studies across airline performance or scheduling data
+
+This repo will collect small projects that are targeted to specific airline-related data collection and analysis problems. Each will live in its own subdirectory. The first project is "flight fragility", which is a study to determine if a single airline (American) is unduly stressed by weather on its schedule execution for specified markets, i.e. spokes from a hub served by regional jet aircraft.

@@ -1,0 +1,23 @@
+primary_route:
+  - origin: LFT
+    dest: DFW
+
+aa_regional_basket:
+  - { origin: LFT, dest: DFW }
+  - { origin: BTR, dest: DFW }
+  - { origin: AEX, dest: DFW }
+  - { origin: MLU, dest: DFW }
+  - { origin: GPT, dest: DFW }
+  - { origin: SHV, dest: DFW }
+
+ua_peer_basket:
+  - { origin: LFT, dest: IAH }
+  - { origin: BTR, dest: IAH }
+  - { origin: GPT, dest: IAH }
+  - { origin: SHV, dest: IAH }
+
+dl_peer_basket:
+  - { origin: LFT, dest: ATL }
+  - { origin: BTR, dest: ATL }
+  - { origin: GPT, dest: ATL }
+  - { origin: SHV, dest: ATL }

@@ -1,29 +1,42 @@
 #!/usr/bin/env python3
 """
-11_extract_faa_weather.py — Extract FAA ASPM/ASQP cancelled-flights-with-weather data.
+11_extract_faa_weather.py — Extract hourly airport weather from NOAA ASOS via IEM.
 
-For each configured route pair and date window this script attempts to pull
-the FAA "Cancelled Flights with Weather Report" from the ASPM web portal.
-Both the raw export payload and a normalized staging CSV are saved.
+WHY THIS REPLACES THE ORIGINAL FAA ASPM APPROACH
+-------------------------------------------------
+The original script targeted https://www.aspm.faa.gov/asqpwx/Index.asp (URL does
+not exist) and the correct FAA ASQP portal (https://www.aspm.faa.gov/asqp/sys/)
+requires a restricted FAA-registered account — not publicly accessible.
+
+Beyond the access problem, the FAA "Cancelled Flights with Weather" report only
+covers cancelled flights, making it impossible to assign a weather bucket to
+operated (non-cancelled) flights. That flaw made the core analysis metric
+(cancellation_rate = cancelled / all_flights_in_weather_bucket) meaningless
+because the adverse/marginal buckets would contain only cancelled flights,
+forcing their cancellation rate to ≈ 1.0 for every carrier.
+
+THE NEW APPROACH
+----------------
+Iowa Environmental Mesonet (IEM) archives NOAA ASOS hourly METAR observations
+for all U.S. airports free of charge with no authentication required.
+We download visibility, cloud layers, and present-weather codes for every airport
+in the study and pre-compute a weather_bucket (benign / marginal / adverse) for
+each airport-hour observation. Script 20 then joins each BTS flight to the NOAA
+weather at its departure airport and arrival airport using UTC-adjusted times,
+giving every flight — operated or cancelled — a meaningful weather context.
 
 Outputs
 -------
-data/raw/faa/faa_cancel_weather_<origin>_<dest>_<start>_<end>.csv
-data/staging/faa_cancel_weather.csv
-data/raw/faa/manifest.csv
+data/raw/faa/noaa_asos_raw.csv            Raw NOAA ASOS download (all stations)
+data/staging/airport_weather_hourly.csv   Normalized hourly weather per airport
+data/raw/faa/manifest.csv                 Audit log
 
 Usage
 -----
 python scripts/11_extract_faa_weather.py \\
     --routes config/routes.yaml \\
     --study  config/study.yaml \\
-    --out    data/staging/faa_cancel_weather.csv [--force]
-
-Notes
------
-FAA ASPM uses ASP.NET session-based forms.  The script attempts a direct POST
-session; if that fails it falls back to a static-URL variant and logs a
-warning.  Raw payloads are saved unchanged for audit purposes.
+    --out    data/staging/airport_weather_hourly.csv [--force]
 """
 
 import argparse
@@ -31,8 +44,6 @@ import csv
 import hashlib
 import io
 import logging
-import re
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,62 +59,58 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ASPM Cancelled Flights with Weather report base URL
-FAA_ASPM_BASE = "https://www.aspm.faa.gov"
-FAA_CANCEL_WEATHER_URL = f"{FAA_ASPM_BASE}/asqpwx/Index.asp"
-
-# FAA staging schema
-FAA_RENAME = {
-    "Scheduled Departure Date": "scheduled_departure_date",
-    "Carrier Code": "carrier_code",
-    "Flight Number": "flight_number",
-    "Departure Airport": "departure_airport",
-    "Arrival Airport": "arrival_airport",
-    "Scheduled Departure Time": "scheduled_departure_time",
-    "Scheduled Arrival Time": "scheduled_arrival_time",
-    "Departure Wind": "dep_wind",
-    "Departure Ceiling": "dep_ceiling",
-    "Departure Visibility": "dep_visibility",
-    "Departure Nearby Thunderstorm": "dep_nearby_ts",
-    "Departure Local Weather": "dep_local_weather",
-    "Arrival Wind": "arr_wind",
-    "Arrival Ceiling": "arr_ceiling",
-    "Arrival Visibility": "arr_visibility",
-    "Arrival Nearby Thunderstorm": "arr_nearby_ts",
-    "Arrival Local Weather": "arr_local_weather",
-    # Alternative FAA column spellings
-    "DEP_WIND": "dep_wind",
-    "DEP_CEIL": "dep_ceiling",
-    "DEP_VIS": "dep_visibility",
-    "DEP_TS": "dep_nearby_ts",
-    "DEP_WX": "dep_local_weather",
-    "ARR_WIND": "arr_wind",
-    "ARR_CEIL": "arr_ceiling",
-    "ARR_VIS": "arr_visibility",
-    "ARR_TS": "arr_nearby_ts",
-    "ARR_WX": "arr_local_weather",
+# ---------------------------------------------------------------------------
+# Airport → ICAO station mapping and timezone
+# ---------------------------------------------------------------------------
+AIRPORT_STATION = {
+    "LFT": "KLFT",
+    "BTR": "KBTR",
+    "AEX": "KAEX",
+    "MLU": "KMLU",
+    "GPT": "KGPT",
+    "SHV": "KSHV",
+    "DFW": "KDFW",
+    "IAH": "KIAH",
+    "ATL": "KATL",
 }
 
-REQUIRED_OUT_COLS = [
-    "scheduled_departure_date",
-    "carrier_code",
-    "flight_number",
-    "departure_airport",
-    "arrival_airport",
-    "scheduled_departure_time",
-    "scheduled_arrival_time",
-    "dep_wind",
-    "dep_ceiling",
-    "dep_visibility",
-    "dep_nearby_ts",
-    "dep_local_weather",
-    "arr_wind",
-    "arr_ceiling",
-    "arr_visibility",
-    "arr_nearby_ts",
-    "arr_local_weather",
-]
+# All study airports except ATL are in Central Time
+AIRPORT_TZ = {
+    "LFT": "America/Chicago",
+    "BTR": "America/Chicago",
+    "AEX": "America/Chicago",
+    "MLU": "America/Chicago",
+    "GPT": "America/Chicago",
+    "SHV": "America/Chicago",
+    "DFW": "America/Chicago",
+    "IAH": "America/Chicago",
+    "ATL": "America/New_York",
+}
 
+# IEM ASOS archive API
+IEM_ASOS_URL = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
+
+# ---------------------------------------------------------------------------
+# Weather bucket thresholds — mirrors spec + fallback text rules
+# ---------------------------------------------------------------------------
+# Adverse:  visibility < 1 SM  OR  ceiling < 500 ft
+#           OR thunderstorm / freezing precip / blizzard / heavy snow
+# Marginal: visibility < 3 SM  OR  ceiling < 1000 ft
+#           OR rain / light snow / mist / fog / drizzle (without adverse)
+# Benign:   all other conditions
+
+ADVERSE_VIS_SM = 1.0
+ADVERSE_CEIL_FT = 500.0
+MARGINAL_VIS_SM = 3.0
+MARGINAL_CEIL_FT = 1000.0
+
+ADVERSE_WX_TOKENS = frozenset(["TS", "FZ", "BLSN", "+SN", "+RASN", "FC"])
+MARGINAL_WX_TOKENS = frozenset(["RA", "SN", "RASN", "DZ", "FG", "MIFG", "BR", "GS", "PL"])
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def load_config(routes_path: Path, study_path: Path):
     with open(routes_path) as f:
@@ -113,18 +120,14 @@ def load_config(routes_path: Path, study_path: Path):
     return routes, study
 
 
-def all_route_pairs(routes: dict) -> list[dict]:
-    pairs = []
-    seen = set()
-    for basket_name, legs in routes.items():
-        if not isinstance(legs, list):
-            continue
-        for leg in legs:
-            key = (leg["origin"], leg["dest"])
-            if key not in seen:
-                pairs.append(leg)
-                seen.add(key)
-    return pairs
+def collect_airports(routes: dict) -> set:
+    airports: set = set()
+    for basket in routes.values():
+        if isinstance(basket, list):
+            for leg in basket:
+                airports.add(leg["origin"])
+                airports.add(leg["dest"])
+    return airports
 
 
 def checksum(path: Path) -> str:
@@ -144,121 +147,216 @@ def append_manifest(manifest_path: Path, row: dict):
         writer.writerow(row)
 
 
-def fetch_faa_cancel_weather(
-    origin: str,
-    dest: str,
+# ---------------------------------------------------------------------------
+# NOAA IEM ASOS fetch
+# ---------------------------------------------------------------------------
+
+def fetch_noaa_asos(
+    stations: list[str],
     start: str,
     end: str,
     session: requests.Session,
 ) -> pd.DataFrame:
     """
-    Attempt to pull FAA ASPM Cancelled Flights with Weather for one route pair.
+    Download hourly METAR observations from the IEM ASOS archive.
 
-    Strategy
-    --------
-    1. GET the report page to obtain any ASP.NET ViewState tokens.
-    2. POST with route/date parameters.
-    3. Parse returned HTML table or CSV.
-
-    Returns an empty DataFrame if extraction fails (caller logs warning).
+    Returns a raw DataFrame with columns:
+        station, valid (UTC), vsby, skyc1-4, skyl1-4, wxcodes, sknt
     """
-    log.info(f"  FAA weather: {origin}→{dest}  {start}..{end}")
+    log.info(f"  Requesting NOAA ASOS data for {len(stations)} stations "
+             f"{start} → {end} ...")
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; FlightFragilityPOC/1.0)",
-        "Referer": FAA_CANCEL_WEATHER_URL,
+    # Parse year/month/day from ISO date strings
+    s_year, s_month, s_day = start.split("-")
+    e_year, e_month, e_day = end.split("-")
+
+    params = {
+        "data": ["vsby", "skyc1", "skyl1", "skyc2", "skyl2",
+                 "skyc3", "skyl3", "skyc4", "skyl4", "presentwx", "sknt", "gust"],
+        "year1": s_year, "month1": s_month, "day1": s_day,
+        "year2": e_year, "month2": e_month, "day2": e_day,
+        "tz": "UTC",
+        "format": "comma",
+        "latlon": "no",
+        "elev": "no",
+        "missing": "M",
+        "trace": "0.0001",
+        "direct": "no",
+        "report_type": "3",   # ASOS routine hourly observations
     }
+    # requests handles repeated keys via list of tuples
+    param_list = []
+    for k, v in params.items():
+        if isinstance(v, list):
+            for item in v:
+                param_list.append(("data", item))
+        else:
+            param_list.append((k, v))
+    for stn in stations:
+        param_list.append(("station", stn))
 
-    try:
-        # Step 1 — seed session and scrape ViewState
-        resp_get = session.get(FAA_CANCEL_WEATHER_URL, headers=headers, timeout=30)
-        resp_get.raise_for_status()
+    resp = session.get(IEM_ASOS_URL, params=param_list, timeout=300)
+    resp.raise_for_status()
 
-        vs = _scrape_viewstate(resp_get.text)
+    text = resp.text
+    # Strip comment lines (start with #)
+    data_lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
+    if not data_lines:
+        raise ValueError("NOAA ASOS returned no data")
 
-        # Step 2 — POST form submission
-        payload = {
-            "__VIEWSTATE": vs.get("__VIEWSTATE", ""),
-            "__VIEWSTATEGENERATOR": vs.get("__VIEWSTATEGENERATOR", ""),
-            "__EVENTVALIDATION": vs.get("__EVENTVALIDATION", ""),
-            "txtAirport": origin,
-            "txtArrAirport": dest,
-            "txtStartDate": start,
-            "txtEndDate": end,
-            "btnSubmit": "Submit",
-        }
-        resp_post = session.post(
-            FAA_CANCEL_WEATHER_URL, data=payload, headers=headers, timeout=120
-        )
-        resp_post.raise_for_status()
-
-        df = _parse_faa_response(resp_post.text)
-        if df is not None and not df.empty:
-            return df
-        log.warning(f"  FAA: empty result for {origin}→{dest}")
-        return pd.DataFrame()
-
-    except Exception as exc:
-        log.warning(f"  FAA fetch failed for {origin}→{dest}: {exc}")
-        return pd.DataFrame()
-
-
-def _scrape_viewstate(html: str) -> dict:
-    """Extract ASP.NET hidden form fields from page HTML."""
-    result = {}
-    for field in ("__VIEWSTATE", "__VIEWSTATEGENERATOR", "__EVENTVALIDATION"):
-        m = re.search(
-            rf'<input[^>]+name="{re.escape(field)}"[^>]+value="([^"]*)"',
-            html,
-            re.IGNORECASE,
-        )
-        if m:
-            result[field] = m.group(1)
-    return result
-
-
-def _parse_faa_response(html: str) -> pd.DataFrame | None:
-    """Parse HTML table from FAA response page."""
-    try:
-        tables = pd.read_html(io.StringIO(html))
-        # Prefer the largest table
-        if tables:
-            df = max(tables, key=len)
-            if len(df) > 0:
-                return df
-    except Exception:
-        pass
-    return None
-
-
-def normalize_faa(df: pd.DataFrame) -> pd.DataFrame:
-    """Rename FAA columns to standardized staging names."""
-    df = df.copy()
-    # Normalize column names
-    df.columns = [str(c).strip() for c in df.columns]
-    df = df.rename(columns={k: v for k, v in FAA_RENAME.items() if k in df.columns})
-
-    # Ensure all required columns exist (fill missing with NaN)
-    for col in REQUIRED_OUT_COLS:
-        if col not in df.columns:
-            df[col] = pd.NA
-
-    # Keep only required columns
-    df = df[REQUIRED_OUT_COLS].copy()
-
-    if "scheduled_departure_date" in df.columns:
-        df["scheduled_departure_date"] = pd.to_datetime(
-            df["scheduled_departure_date"], errors="coerce"
-        )
-
+    df = pd.read_csv(io.StringIO("\n".join(data_lines)), dtype=str, low_memory=False)
+    log.info(f"  NOAA ASOS raw rows: {len(df):,}")
     return df
 
 
+# ---------------------------------------------------------------------------
+# Ceiling derivation from sky-condition layers
+# ---------------------------------------------------------------------------
+
+def _derive_ceiling(row: pd.Series) -> float | None:
+    """Return the lowest BKN or OVC layer height in feet, or None if none."""
+    for i in range(1, 5):
+        cov = str(row.get(f"skyc{i}", "M") or "M").strip().upper()
+        ht_str = str(row.get(f"skyl{i}", "M") or "M").strip()
+        if cov in ("BKN", "OVC", "OVX"):
+            try:
+                ht = float(ht_str)
+                return ht
+            except ValueError:
+                pass
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Weather bucket classification
+# ---------------------------------------------------------------------------
+
+def classify_weather_bucket(vsby_sm: float | None, ceiling_ft: float | None, wxcodes: str) -> str:
+    """
+    Classify one airport-hour into benign / marginal / adverse.
+
+    Rules mirror the spec's ASPM-level thresholds and fallback text rules,
+    but expressed in METAR visibility (statute miles) and ceiling (feet AGL)
+    equivalents drawn from FAA IFR/MVFR/VFR categories:
+
+      Adverse  ≈ IFR/LIFR : vsby < 1 SM  OR ceiling < 500 ft
+                             OR TS/freezing precip/heavy snow/blizzard
+      Marginal ≈ MVFR     : vsby 1-3 SM  OR ceiling 500-1000 ft
+                             OR rain/snow/fog/mist/drizzle
+      Benign   ≈ VFR      : all other conditions
+    """
+    wx = str(wxcodes or "").upper()
+
+    # --- Adverse check ---
+    # Present-weather tokens that indicate severe conditions regardless of vis/ceil
+    if any(tok in wx for tok in ADVERSE_WX_TOKENS):
+        return "adverse"
+    if vsby_sm is not None and vsby_sm < ADVERSE_VIS_SM:
+        return "adverse"
+    if ceiling_ft is not None and ceiling_ft < ADVERSE_CEIL_FT:
+        return "adverse"
+
+    # --- Marginal check ---
+    if any(tok in wx for tok in MARGINAL_WX_TOKENS):
+        return "marginal"
+    if vsby_sm is not None and vsby_sm < MARGINAL_VIS_SM:
+        return "marginal"
+    if ceiling_ft is not None and ceiling_ft < MARGINAL_CEIL_FT:
+        return "marginal"
+
+    return "benign"
+
+
+# ---------------------------------------------------------------------------
+# Normalize raw NOAA → per-airport-hour staging
+# ---------------------------------------------------------------------------
+
+def normalize_noaa(df: pd.DataFrame, airport_station_inv: dict[str, str]) -> pd.DataFrame:
+    """
+    Normalize the raw NOAA ASOS DataFrame into one row per airport-hour.
+
+    When there are multiple observations within an hour (SPECI + METAR),
+    we take the worst conditions (min vsby, min ceiling, combined wx codes).
+
+    Returns columns:
+        airport_code, obs_utc, obs_date_utc, obs_hour_utc,
+        visibility_sm, ceiling_ft, wxcodes, wind_kt, weather_bucket, tz_name
+    """
+    if df.empty:
+        return pd.DataFrame()
+
+    df = df.copy()
+
+    # Map station → airport code (e.g. "LFT" → "LFT")
+    df["airport_code"] = df["station"].str.upper().map(
+        lambda s: airport_station_inv.get(s, airport_station_inv.get("K" + s, s))
+    )
+
+    # Parse UTC datetime
+    df["obs_utc"] = pd.to_datetime(df["valid"], errors="coerce", utc=True)
+    df = df.dropna(subset=["obs_utc"])
+    df["obs_date_utc"] = df["obs_utc"].dt.date.astype(str)
+    df["obs_hour_utc"] = df["obs_utc"].dt.hour
+
+    # Numeric conversions
+    df["visibility_sm"] = pd.to_numeric(df["vsby"].replace("M", None), errors="coerce")
+    df["wind_kt"] = pd.to_numeric(df["sknt"].replace("M", None), errors="coerce")
+
+    # Ceiling from cloud layers
+    df["ceiling_ft"] = df.apply(_derive_ceiling, axis=1)
+
+    # Present weather
+    df["wxcodes"] = df["wxcodes"].replace("M", "").fillna("")
+
+    # Derive weather bucket per observation
+    df["weather_bucket_raw"] = df.apply(
+        lambda r: classify_weather_bucket(r["visibility_sm"], r["ceiling_ft"], r["wxcodes"]),
+        axis=1,
+    )
+
+    # Bucket severity ranking for aggregation
+    bucket_rank = {"adverse": 2, "marginal": 1, "benign": 0}
+
+    # Aggregate to one row per airport-hour (worst conditions in the hour)
+    def _agg_hour(group: pd.DataFrame) -> pd.Series:
+        worst_rank = group["weather_bucket_raw"].map(bucket_rank).max()
+        worst_bucket = {v: k for k, v in bucket_rank.items()}[worst_rank]
+        all_wx = " ".join(group["wxcodes"].dropna())
+        min_vsby = group["visibility_sm"].min()
+        min_ceil = group["ceiling_ft"].min()
+        max_wind = group["wind_kt"].max()
+        return pd.Series({
+            "visibility_sm": round(min_vsby, 2) if pd.notna(min_vsby) else None,
+            "ceiling_ft": round(min_ceil, 0) if pd.notna(min_ceil) else None,
+            "wxcodes": all_wx.strip(),
+            "wind_kt": round(max_wind, 1) if pd.notna(max_wind) else None,
+            "weather_bucket": worst_bucket,
+        })
+
+    hourly = (
+        df.groupby(["airport_code", "obs_date_utc", "obs_hour_utc"])
+        .apply(_agg_hour)
+        .reset_index()
+    )
+
+    # Add tz_name for use by the fact-builder
+    hourly["tz_name"] = hourly["airport_code"].map(AIRPORT_TZ).fillna("America/Chicago")
+
+    log.info(f"  Normalized to {len(hourly):,} airport-hour rows")
+    return hourly
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main():
-    parser = argparse.ArgumentParser(description="Extract FAA ASPM cancellation-with-weather data")
+    parser = argparse.ArgumentParser(
+        description="Extract hourly airport weather from NOAA ASOS (IEM)"
+    )
     parser.add_argument("--routes", default="config/routes.yaml")
     parser.add_argument("--study", default="config/study.yaml")
-    parser.add_argument("--out", default="data/staging/faa_cancel_weather.csv")
+    parser.add_argument("--out", default="data/staging/airport_weather_hourly.csv")
     parser.add_argument("--raw-dir", default="data/raw/faa")
     parser.add_argument("--force", action="store_true", help="Re-download existing raw files")
     args = parser.parse_args()
@@ -270,68 +368,61 @@ def main():
     out_path = root / args.out
     raw_dir = root / args.raw_dir
     manifest_path = raw_dir / "manifest.csv"
+    raw_file = raw_dir / "noaa_asos_raw.csv"
 
     raw_dir.mkdir(parents=True, exist_ok=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     routes, study = load_config(routes_path, study_path)
-    pairs = all_route_pairs(routes)
+    airports = collect_airports(routes)
     start = study["study_start"]
     end = study["study_end"]
 
-    log.info(f"Route pairs to query: {pairs}")
+    # Build station list for airports we have mappings for
+    stations = [AIRPORT_STATION[ap] for ap in airports if ap in AIRPORT_STATION]
+    # Inverse map: ICAO station → airport code (both with and without K prefix)
+    airport_station_inv = {v: k for k, v in AIRPORT_STATION.items()}
+    airport_station_inv.update({v[1:]: k for k, v in AIRPORT_STATION.items()})
 
-    all_frames: list[pd.DataFrame] = []
+    log.info(f"Airport universe: {sorted(airports)}")
+    log.info(f"ASOS stations:    {sorted(stations)}")
+
     session = requests.Session()
 
-    for leg in pairs:
-        origin = leg["origin"]
-        dest = leg["dest"]
-        slug = f"{origin}_{dest}_{start}_{end}"
-        raw_file = raw_dir / f"faa_cancel_weather_{slug}.csv"
+    if raw_file.exists() and not args.force:
+        log.info(f"Using cached NOAA raw file: {raw_file}")
+        df_raw = pd.read_csv(raw_file, dtype=str, low_memory=False)
+    else:
+        df_raw = fetch_noaa_asos(stations, start, end, session)
+        df_raw.to_csv(raw_file, index=False)
+        append_manifest(manifest_path, {
+            "source": "NOAA_ASOS_IEM",
+            "filename": raw_file.name,
+            "rows": len(df_raw),
+            "extracted_at": datetime.now(timezone.utc).isoformat(),
+            "checksum": checksum(raw_file),
+            "params": f"stations={sorted(stations)},start={start},end={end}",
+        })
+        log.info(f"Raw NOAA file saved: {raw_file}  ({len(df_raw):,} rows)")
+        time.sleep(1)
 
-        if raw_file.exists() and not args.force:
-            log.info(f"  Using cached {raw_file.name}")
-            df_raw = pd.read_csv(raw_file, dtype=str)
-        else:
-            df_raw = fetch_faa_cancel_weather(origin, dest, start, end, session)
-            if df_raw.empty:
-                log.warning(f"  No data returned for {origin}→{dest}; writing empty file.")
-                df_raw = pd.DataFrame(columns=list(FAA_RENAME.values()))
+    # Normalize and write staging
+    staging = normalize_noaa(df_raw, airport_station_inv)
+    if staging.empty:
+        log.error("No NOAA ASOS data after normalization.")
+        raise SystemExit(1)
 
-            df_raw.to_csv(raw_file, index=False)
-            append_manifest(manifest_path, {
-                "source": "FAA_ASPM",
-                "filename": raw_file.name,
-                "rows": len(df_raw),
-                "extracted_at": datetime.now(timezone.utc).isoformat(),
-                "checksum": checksum(raw_file),
-                "params": f"origin={origin},dest={dest},start={start},end={end}",
-            })
-            time.sleep(2)
-
-        normalized = normalize_faa(df_raw)
-        # Tag with route for traceability
-        normalized["departure_airport"] = normalized["departure_airport"].fillna(origin)
-        normalized["arrival_airport"] = normalized["arrival_airport"].fillna(dest)
-        all_frames.append(normalized)
-
-    if not all_frames:
-        log.error("No FAA data extracted.")
-        sys.exit(1)
-
-    staging = pd.concat(all_frames, ignore_index=True)
-    staging = staging.drop_duplicates()
     staging.to_csv(out_path, index=False)
-    log.info(f"FAA staging written: {out_path}  ({len(staging):,} rows)")
+    log.info(f"Weather staging written: {out_path}  ({len(staging):,} rows)")
 
-    # QA
-    log.info("=== FAA Staging QA ===")
-    log.info(f"  Total cancelled-with-weather records: {len(staging):,}")
-    if "carrier_code" in staging.columns:
-        log.info(f"  Carriers: {sorted(staging['carrier_code'].dropna().unique())}")
-    null_rate = staging.isnull().mean().mean()
-    log.info(f"  Overall null rate: {null_rate:.2%}")
+    # QA summary
+    log.info("=== NOAA ASOS Weather QA ===")
+    log.info(f"  Airports covered: {sorted(staging['airport_code'].unique())}")
+    log.info(f"  Date range: {staging['obs_date_utc'].min()} → {staging['obs_date_utc'].max()}")
+    bucket_counts = staging["weather_bucket"].value_counts()
+    for bucket, n in bucket_counts.items():
+        pct = n / len(staging) * 100
+        log.info(f"  {bucket:10s}: {n:>7,} hours  ({pct:.1f}%)")
 
 
 if __name__ == "__main__":

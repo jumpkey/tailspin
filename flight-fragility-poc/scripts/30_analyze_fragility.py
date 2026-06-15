@@ -68,8 +68,16 @@ def aggregate(fact: pd.DataFrame) -> pd.DataFrame:
             log.warning(f"  Column '{k}' missing — using 'unknown' placeholder")
             fact[k] = "unknown"
 
-    # Only operated flights for average delay
-    operated = fact[fact["operated_flag"] == 1] if "operated_flag" in fact.columns else fact
+    # Compute avg departure delay on operated flights only (cancelled flights
+    # have NaN dep_delay_min, but we filter explicitly for correctness)
+    operated = fact[fact["operated_flag"] == 1].copy() if "operated_flag" in fact.columns else fact.copy()
+
+    delay_by_group = (
+        operated.groupby(group_keys)["dep_delay_min"]
+        .mean()
+        .reset_index()
+        .rename(columns={"dep_delay_min": "avg_dep_delay_operated"})
+    )
 
     agg = (
         fact.groupby(group_keys)
@@ -78,9 +86,9 @@ def aggregate(fact: pd.DataFrame) -> pd.DataFrame:
             cancelled_count=("cancelled_flag", "sum"),
             operated_count=("operated_flag", "sum"),
             severe_delay_count=("severe_delay_flag", "sum"),
-            avg_dep_delay_operated=("dep_delay_min", "mean"),
         )
         .reset_index()
+        .merge(delay_by_group, on=group_keys, how="left")
     )
 
     agg["cancellation_rate"] = agg["cancelled_count"] / agg["flights_total"]

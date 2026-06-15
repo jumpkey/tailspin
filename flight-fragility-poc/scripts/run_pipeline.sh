@@ -49,13 +49,13 @@ python scripts/10_extract_bts.py \
   --out    data/staging/bts_flights.csv \
   $FORCE_FLAG
 
-# Step 2 — Extract FAA ASPM cancellation-with-weather data
+# Step 2 — Extract NOAA ASOS hourly airport weather (replaces FAA ASPM)
 echo ""
-echo "[11] Extracting FAA ASPM weather data..."
+echo "[11] Extracting NOAA ASOS hourly weather data..."
 python scripts/11_extract_faa_weather.py \
   --routes config/routes.yaml \
   --study  "$STUDY_FILE" \
-  --out    data/staging/faa_cancel_weather.csv \
+  --out    data/staging/airport_weather_hourly.csv \
   $FORCE_FLAG
 
 # Step 3 — Optional: FlightAware AeroAPI extraction
@@ -76,7 +76,8 @@ echo ""
 echo "[20] Building flight fact table..."
 python scripts/20_build_flight_fact.py \
   --routes config/routes.yaml \
-  --study  "$STUDY_FILE"
+  --study  "$STUDY_FILE" \
+  --weather data/staging/airport_weather_hourly.csv
 
 # Step 5 — Analyze fragility
 echo ""

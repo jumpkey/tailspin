@@ -1,0 +1,26 @@
+dimension,row_count,check
+2024-06,2569.0,bts_rows_by_month
+2025-06,2529.0,bts_rows_by_month
+aa_regional_basket/adverse/baseline,286.0,sample_size_by_bucket
+aa_regional_basket/adverse/recent,325.0,sample_size_by_bucket
+aa_regional_basket/benign/baseline,172.0,sample_size_by_bucket
+aa_regional_basket/benign/recent,343.0,sample_size_by_bucket
+aa_regional_basket/marginal/baseline,338.0,sample_size_by_bucket
+aa_regional_basket/marginal/recent,246.0,sample_size_by_bucket
+dl_peer_basket/adverse/baseline,390.0,sample_size_by_bucket
+dl_peer_basket/adverse/recent,328.0,sample_size_by_bucket
+dl_peer_basket/benign/baseline,224.0,sample_size_by_bucket
+dl_peer_basket/benign/recent,195.0,sample_size_by_bucket
+dl_peer_basket/marginal/baseline,299.0,sample_size_by_bucket
+dl_peer_basket/marginal/recent,246.0,sample_size_by_bucket
+ua_peer_basket/adverse/baseline,359.0,sample_size_by_bucket
+ua_peer_basket/adverse/recent,366.0,sample_size_by_bucket
+ua_peer_basket/benign/baseline,342.0,sample_size_by_bucket
+ua_peer_basket/benign/recent,307.0,sample_size_by_bucket
+ua_peer_basket/marginal/baseline,159.0,sample_size_by_bucket
+ua_peer_basket/marginal/recent,173.0,sample_size_by_bucket
+cancelled_flights,471.0,faa_join_total_cancelled
+faa_matched,0.0,faa_join_matched
+faa_join_rate,0.0,faa_join_rate (synthetic data)
+NOTE,0.0,These are SYNTHETIC test data; re-run pipeline with live data
+weather_bucket,0.0,null_rate

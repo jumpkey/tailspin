@@ -1,0 +1,21 @@
+study_start: "2024-01-01"
+study_end:   "2025-12-31"
+
+baseline_start: "2024-01-01"
+baseline_end:   "2024-12-31"
+recent_start:   "2025-01-01"
+recent_end:     "2025-12-31"
+
+delay_threshold_minutes: 60
+min_route_flights: 100
+
+weather_bucket_logic:
+  benign:
+    aspm_levels_allowed: ["None", "Minor"]
+  marginal:
+    aspm_levels_allowed: ["Moderate"]
+  adverse:
+    aspm_levels_allowed: ["Severe"]
+
+use_flightaware: false
+flightaware_mode: "validation_only"

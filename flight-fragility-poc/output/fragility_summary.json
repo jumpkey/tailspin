@@ -1,0 +1,22 @@
+{
+  "aa_cancel_rate_marginal": 0.1284,
+  "ua_cancel_rate_marginal": 0.0512,
+  "dl_cancel_rate_marginal": 0.0532,
+  "peer_avg_cancel_rate_marginal": 0.0522,
+  "aa_vs_peer_cancel_ratio_marginal": 2.46,
+  "aa_cancel_rate_adverse": 0.2995,
+  "ua_cancel_rate_adverse": 0.1048,
+  "dl_cancel_rate_adverse": 0.1003,
+  "peer_avg_cancel_rate_adverse": 0.1026,
+  "aa_vs_peer_cancel_ratio_adverse": 2.92,
+  "aa_cancel_rate_benign": 0.0136,
+  "ua_cancel_rate_benign": 0.0123,
+  "dl_cancel_rate_benign": 0.0095,
+  "peer_avg_cancel_rate_benign": 0.0109,
+  "aa_vs_peer_cancel_ratio_benign": 1.25,
+  "chart_annotation": "AA regional cancellation rate in marginal weather is 2.46x peers",
+  "aa_cancel_baseline_adverse": 0.3007,
+  "aa_cancel_recent_adverse": 0.2985,
+  "aa_cancel_baseline_marginal": 0.1213,
+  "aa_cancel_recent_marginal": 0.1382
+}

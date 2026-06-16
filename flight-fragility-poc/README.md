@@ -105,6 +105,7 @@ flight-fragility-poc/
     weather_fragility_machine_chart_data.csv    ← Fragility II chart-ready aggregate metrics
     fragility_ii_machine_summary.json           ← Fragility II executive annotation values
     fragility_ii_summary.md                     ← Fragility II written result summary
+    fragility_ii_operator_breakdown.csv         ← Fragility II controllable/cascade by regional operator
     weather_fragility_machine_exec_chart.png    ← Fragility II deliverable PNG chart
     qa_summary.csv                              ← row counts, join rates, null rates (both studies)
 ```
@@ -261,8 +262,19 @@ python scripts/41_plot_fragility_machine.py
 > controllable severe-delay rate runs consistently *below* peers, while its
 > cascade severe-delay rate runs consistently *above* peers but escalates
 > *less* with weather severity than the peer basket does. Both findings are
-> reported as observed. Full detail, sample sizes, and caveats are in
-> [AAR.md](AAR.md).
+> reported as observed.
+>
+> A further breakdown by regional operator within the AA basket (BTS's
+> reporting-carrier field is already operator-level for these routes — see
+> [output/fragility_ii_summary.md](output/fragility_ii_summary.md) section 6
+> and [AAR.md](AAR.md)) finds the basket-level pattern is not uniform across
+> Envoy Air (MQ), PSA Airlines (OH), and SkyWest (OO): Envoy and PSA show the
+> low-controllable / high-and-escalating-cascade profile, while SkyWest
+> within the AA basket shows the opposite — a high and weather-escalating
+> controllable rate with a low, flat cascade rate — a profile that also
+> appears for SkyWest under its DL contract, suggesting an operator-level
+> rather than AA-contract-specific signature for SkyWest specifically. Full
+> detail, sample sizes, and caveats are in [AAR.md](AAR.md).
 
 See the [After Action Report](AAR.md) for decisions made, issues encountered,
 and next steps.

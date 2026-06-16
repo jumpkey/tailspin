@@ -12,11 +12,21 @@ script's output is meant to support.
 Aggregation grain: market_bucket × weather_bucket × period_flag, plus a
 pooled `combined_peer_basket` (UA + DL summed) sensitivity series.
 
+A second, coarser aggregation (market_bucket × carrier_code × weather_bucket,
+periods combined to preserve sample size) breaks out the controllable/cascade
+metrics by regional operator within each basket. BTS's `Reporting_Airline`
+field (`carrier_code` in the fact table) is the carrier that files the
+on-time-performance report, which for these routes is the regional partner
+itself (e.g. MQ/Envoy, OH/PSA, OO/SkyWest) rather than "AA" — so it already
+provides operator-level granularity without needing a separate
+operating-carrier field.
+
 Outputs
 -------
 output/weather_fragility_machine_chart_data.csv
 output/fragility_ii_machine_summary.json
 output/fragility_ii_summary.md
+output/fragility_ii_operator_breakdown.csv
 
 Usage
 -----
@@ -118,6 +128,45 @@ def aggregate(fact: pd.DataFrame, min_sample_threshold: int) -> pd.DataFrame:
     # the UA peer basket's adverse/baseline cell, 30 operated flights) is
     # still flagged rather than treated as comfortably sampled.
     agg["low_confidence_flag"] = (agg["operated_count"] <= min_sample_threshold).astype(int)
+    return agg
+
+
+def aggregate_by_operator(fact: pd.DataFrame, min_sample_threshold: int) -> pd.DataFrame:
+    """
+    Aggregate to market_bucket x carrier_code x weather_bucket grain (periods
+    combined) so the controllable/cascade signature can be inspected per
+    regional operator within each basket, e.g. to see whether the AA basket's
+    cascade-delay signature is concentrated in one regional partner or spread
+    across all of them.
+    """
+    if "carrier_code" not in fact.columns:
+        log.warning("  Column 'carrier_code' missing — skipping operator breakdown")
+        return pd.DataFrame()
+
+    df = fact[fact["weather_bucket"].isin(WEATHER_BUCKETS)]
+    agg = (
+        df.groupby(["market_bucket", "carrier_code", "weather_bucket"])
+        .agg(
+            flights_total=("route_key", "size"),
+            operated_count=("operated_flag", "sum"),
+            controllable_cancel_count=("controllable_cancel_flag", "sum"),
+            controllable_severe_delay_count=("controllable_severe_delay_flag", "sum"),
+            late_arriving_severe_delay_count=("late_arriving_severe_delay_flag", "sum"),
+        )
+        .reset_index()
+    )
+    agg["controllable_cancel_rate"] = (agg["controllable_cancel_count"] / agg["flights_total"]).round(4)
+    agg["controllable_severe_delay_rate"] = np.where(
+        agg["operated_count"] > 0,
+        (agg["controllable_severe_delay_count"] / agg["operated_count"]).round(4), np.nan,
+    )
+    agg["late_arriving_severe_delay_rate"] = np.where(
+        agg["operated_count"] > 0,
+        (agg["late_arriving_severe_delay_count"] / agg["operated_count"]).round(4), np.nan,
+    )
+    agg["low_confidence_flag"] = (agg["operated_count"] <= min_sample_threshold).astype(int)
+    agg["weather_bucket"] = pd.Categorical(agg["weather_bucket"], categories=WEATHER_BUCKETS, ordered=True)
+    agg = agg.sort_values(["market_bucket", "carrier_code", "weather_bucket"]).reset_index(drop=True)
     return agg
 
 
@@ -244,7 +293,90 @@ def low_confidence_cells(agg: pd.DataFrame) -> pd.DataFrame:
     return cells[GROUP_KEYS + ["flights_total", "operated_count"]]
 
 
-def write_markdown_summary(summary: dict, low_conf: pd.DataFrame, out_path: Path):
+OPERATOR_LABELS = {
+    "MQ": "Envoy Air (MQ)",
+    "OH": "PSA Airlines (OH)",
+    "OO": "SkyWest (OO)",
+    "DL": "Delta mainline (DL)",
+    "9E": "Endeavor Air (9E)",
+    "UA": "United mainline (UA)",
+}
+
+
+def write_operator_markdown(op_agg: pd.DataFrame) -> list:
+    """Render the operator-breakdown section as a list of markdown lines."""
+    def fmt_pct(x):
+        return f"{x:.2%}" if x is not None and not (isinstance(x, float) and np.isnan(x)) else "n/a"
+
+    lines = []
+    lines.append("## 6. Operator-level breakdown within baskets")
+    lines.append("")
+    lines.append(
+        "BTS's `Reporting_Airline` field (`carrier_code` in the fact table) is the carrier "
+        "that files the on-time-performance report for each flight. For these routes that is "
+        "the regional partner itself, not \"AA\"/\"UA\"/\"DL\" — so it already provides "
+        "operator-level granularity inside each route-defined basket, without a separate "
+        "operating-carrier field. Periods (2024/2025) are combined here to keep cells "
+        "above the minimum-sample threshold; this view cannot also be split by period."
+    )
+    lines.append("")
+
+    if op_agg.empty:
+        lines.append("Operator breakdown unavailable for this run (missing `carrier_code`).")
+        lines.append("")
+        return lines
+
+    for basket in ["aa_regional_basket", "dl_peer_basket", "ua_peer_basket"]:
+        sub = op_agg[op_agg["market_bucket"] == basket]
+        if sub.empty:
+            continue
+        carriers = [c for c in sub["carrier_code"].unique()]
+        lines.append(f"**{basket}**")
+        lines.append("")
+        lines.append(
+            "| Operator | Weather | Operated (n) | Controllable severe-delay rate | "
+            "Late-arriving (cascade) severe-delay rate | Controllable cancel rate |"
+        )
+        lines.append("|---|---|---|---|---|---|")
+        for carrier in carriers:
+            crows = sub[sub["carrier_code"] == carrier].sort_values("weather_bucket")
+            label = OPERATOR_LABELS.get(carrier, carrier)
+            for _, r in crows.iterrows():
+                flag = " *" if r["low_confidence_flag"] else ""
+                lines.append(
+                    f"| {label} | {str(r['weather_bucket']).title()} | {int(r['operated_count'])}{flag} | "
+                    f"{fmt_pct(r['controllable_severe_delay_rate'])} | "
+                    f"{fmt_pct(r['late_arriving_severe_delay_rate'])} | "
+                    f"{fmt_pct(r['controllable_cancel_rate'])} |"
+                )
+        lines.append("")
+
+    lines.append(
+        "\\* low-confidence row (operated flights at or below the minimum-sample threshold)."
+    )
+    lines.append("")
+    lines.append(
+        "SkyWest (OO) appears in all three baskets under a different mainline contract in "
+        "each. Comparing its row across the AA, DL, and UA tables above is the closest this "
+        "study can get to separating an operator-wide SkyWest effect from an AA-contract-"
+        "specific effect, per the spec's \"Regional-operator overlap across baskets\" risk. "
+        "Envoy (MQ) and PSA (OH) fly only under the AA contract in this study's baskets, so "
+        "there is no cross-contract comparison available for them here; any signature specific "
+        "to either carrier cannot be distinguished from an AA-contract-specific effect using "
+        "this data alone."
+    )
+    lines.append("")
+    lines.append(
+        "This breakdown is still subject to every caveat in section 4 and 7 below: cause "
+        "codes are self-reported per flight by whichever carrier reports it, "
+        "`controllable_*` does not isolate maintenance from crew or other factors, and "
+        "`late_arriving_severe_delay_rate` reflects propagated disruption, not its original cause."
+    )
+    lines.append("")
+    return lines
+
+
+def write_markdown_summary(summary: dict, low_conf: pd.DataFrame, op_agg: pd.DataFrame, out_path: Path):
     def fmt_pct(x):
         return f"{x:.2%}" if x is not None and not (isinstance(x, float) and np.isnan(x)) else "n/a"
 
@@ -263,7 +395,7 @@ def write_markdown_summary(summary: dict, low_conf: pd.DataFrame, out_path: Path
         "DL peer baskets, and whether that signature strengthens under marginal or "
         "adverse weather. It does not identify which internal function (maintenance, "
         "crew, or another controllable factor) is responsible — see the spec's "
-        '"Risks, threats to validity, and alternative explanations" section, item 6 below.'
+        '"Risks, threats to validity, and alternative explanations" section, item 7 below.'
     )
     lines.append("")
 
@@ -355,19 +487,21 @@ def write_markdown_summary(summary: dict, low_conf: pd.DataFrame, out_path: Path
             )
     lines.append("")
     lines.append(
-        "**Data availability note**: the spec for this add-on anticipated breaking out "
-        "controllable and cascade metrics by operating/regional carrier within each basket "
-        "(to test whether an AA-basket effect is concentrated in one regional partner or "
-        "spread across all of them). The BTS On-Time Performance extract used in this study "
-        "reports only the marketing/reporting carrier (already the basket-defining field — "
-        "AA, UA, or DL) and does not include a separate operating-carrier identity field, so "
-        "that breakout could not be implemented from this data source. The SkyWest cross-"
-        "contract overlap documented in Fragility I therefore remains a qualitative, not a "
-        "quantitative, finding in this study."
+        "**Data availability note**: BTS On-Time Performance extracts do not include a "
+        "field literally named \"operating carrier\" distinct from the reporting carrier. "
+        "For the routes in this study, however, the reporting carrier (`carrier_code`, BTS's "
+        "`Reporting_Airline`) already identifies the regional partner operating the flight "
+        "(MQ/Envoy, OH/PSA, OO/SkyWest), because regional carriers file their own on-time-"
+        "performance reports under their own code even when the flight is sold and gated as "
+        "American Eagle. Section 7 below uses that field to break out the controllable/cascade "
+        "metrics by operator within each basket, addressing the spec's request to test whether "
+        "an AA-basket effect concentrates in one regional partner or is spread across all of them."
     )
     lines.append("")
 
-    lines.append("## 6. Threats to validity")
+    lines.extend(write_operator_markdown(op_agg))
+
+    lines.append("## 7. Threats to validity")
     lines.append("")
     lines.append(
         "See `flight_fragility_ii_machine_addon_spec.md`, section \"Risks, threats to "
@@ -391,6 +525,7 @@ def main():
     parser.add_argument("--out", default="output/weather_fragility_machine_chart_data.csv")
     parser.add_argument("--summary-out", default="output/fragility_ii_machine_summary.json")
     parser.add_argument("--md-out", default="output/fragility_ii_summary.md")
+    parser.add_argument("--operator-out", default="output/fragility_ii_operator_breakdown.csv")
     args = parser.parse_args()
 
     script_dir = Path(__file__).parent
@@ -400,6 +535,7 @@ def main():
     out_path = root / args.out
     summary_path = root / args.summary_out
     md_path = root / args.md_out
+    operator_path = root / args.operator_out
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -424,7 +560,13 @@ def main():
     low_conf = low_confidence_cells(agg)
     if not low_conf.empty:
         log.warning(f"Low-confidence cells (operated_count < {min_sample_threshold}):\n{low_conf.to_string(index=False)}")
-    write_markdown_summary(summary, low_conf, md_path)
+
+    op_agg = aggregate_by_operator(fact, min_sample_threshold)
+    if not op_agg.empty:
+        op_agg.to_csv(operator_path, index=False)
+        log.info(f"Operator breakdown written: {operator_path}")
+
+    write_markdown_summary(summary, low_conf, op_agg, md_path)
 
     log.info("=== Fragility II Summary ===")
     for wx in WEATHER_BUCKETS:

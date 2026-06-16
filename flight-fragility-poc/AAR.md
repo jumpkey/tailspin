@@ -517,15 +517,17 @@ for phase-1 deliverables.
   operated flights of 32 total) — the same cell already flagged as thin
   elsewhere in this document. All adverse-weather ratios in the written
   summary are marked provisional as a result.
-- **Operating-carrier breakout not implementable**: the spec anticipated
-  breaking out controllable/cascade metrics by operating regional carrier,
-  to test whether an AA-basket effect concentrates in one regional partner
-  or is spread across all of them. The BTS On-Time Performance extract used
-  here reports only the marketing/reporting carrier — already the
-  basket-defining field (AA, UA, DL) — and has no separate operating-carrier
-  identity column, so this breakout could not be built from this data
-  source. Disclosed in `output/fragility_ii_summary.md` as a data-
-  availability limitation, not an oversight.
+- **Operating-carrier breakout — corrected**: an earlier draft of this
+  section stated this breakout was impossible because BTS has no field
+  distinct from the marketing/reporting carrier. That was wrong on the key
+  point: the basket is assigned by route, not by `Reporting_Airline`, and
+  `Reporting_Airline` (`carrier_code` in the fact table) for these routes is
+  already the regional partner's own code — MQ (Envoy), OH (PSA), OO
+  (SkyWest) — not "AA"/"UA"/"DL", because regional carriers file their own
+  on-time-performance reports under their own code. The breakout the spec
+  asked for is therefore implemented; see "Operator-level breakdown" below
+  and `output/fragility_ii_summary.md` section 6 /
+  `output/fragility_ii_operator_breakdown.csv`.
 
 ### Headline results
 
@@ -557,11 +559,40 @@ see `output/fragility_ii_summary.md` and the spec's "Risks, threats to
 validity, and alternative explanations" section for the full disclosure
 this finding should be read alongside.
 
+### Operator-level breakdown
+
+The AA regional basket is served by three regional carriers with usable
+sample sizes in every weather bucket: Envoy Air (MQ, 7,530 flights), PSA
+Airlines (OH, 5,357), and SkyWest (OO, 5,167). Breaking the same two metrics
+out by operator (periods combined to preserve sample size) shows the
+basket-level pattern is not uniform:
+
+| Operator | Benign controllable | Marginal controllable | Adverse controllable | Benign cascade | Marginal cascade | Adverse cascade |
+|---|---|---|---|---|---|---|
+| Envoy (MQ) | 1.48% | 2.21% | 2.28% | 3.82% | 5.41% | 9.73% |
+| PSA (OH) | 2.54% | 2.86% | 4.29% | 8.60% | 10.38% | 11.36% |
+| SkyWest (OO, AA contract) | 5.23% | 4.78% | 8.88% | 1.06% | 0.82% | 1.32% |
+
+Envoy and PSA show the same qualitative profile as the AA basket overall —
+low controllable rate, high and weather-escalating cascade rate. SkyWest
+under the AA contract shows close to the opposite profile: a higher,
+weather-escalating *controllable* rate and a low, flat cascade rate. That
+SkyWest profile also appears when SkyWest flies under the DL contract
+(controllable 8.31% → 6.99% → 10.32%, cascade 0.00% throughout in the DL
+peer basket), which is some evidence the SkyWest signature travels with the
+operator rather than the AA contract specifically — though Envoy and PSA
+fly only under the AA contract in this study, so no equivalent
+cross-contract check exists for them. This is unpacked further in
+`output/fragility_ii_summary.md` section 6 and
+`output/fragility_ii_operator_breakdown.csv`; the same self-reported-cause-
+data and cause-granularity caveats apply at this finer grain.
+
 ### Files produced
 
 - `output/weather_fragility_machine_chart_data.csv`
 - `output/fragility_ii_machine_summary.json`
 - `output/fragility_ii_summary.md`
+- `output/fragility_ii_operator_breakdown.csv`
 - `output/weather_fragility_machine_exec_chart.png`
 
 ---

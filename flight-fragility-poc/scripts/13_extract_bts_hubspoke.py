@@ -215,7 +215,11 @@ def main():
     session = requests.Session()
 
     for year, month in months_in_range(start, end):
-        raw_file = raw_dir / f"bts_hubspoke_{year}_{month:02d}.csv"
+        # Cache filename is keyed by run_mode, not just year/month: different
+        # run_modes filter the same calendar month to different hub sets
+        # (e.g. test=DFW-only vs local=DFW+CLT+ORD+PHL), so a year_month-only
+        # key would silently reuse a cache built for the wrong hub list.
+        raw_file = raw_dir / f"bts_hubspoke_{run_mode}_{year}_{month:02d}.csv"
 
         if raw_file.exists() and not args.force:
             log.info(f"  Using cached {raw_file.name}")

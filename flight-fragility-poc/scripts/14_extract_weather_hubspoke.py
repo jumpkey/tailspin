@@ -17,9 +17,19 @@ join keys as 11_extract_faa_weather.py; kept as a separate script (not
 parameterized into 11) so 11 and its 9-airport cache stay untouched for
 Fragility I-III reproducibility.
 
+The NOAA IEM ASOS request is chunked by calendar month rather than fired
+once for the whole study window: a single request spanning the full
+multi-year `local`/`bigrun` window against the full discovered-airport
+station list would be tens of times larger than anything validated at
+`test` scale (1 station-month vs. potentially 50-100+ station-months),
+risking either a request timeout or the free IEM service choking on an
+oversized ask. Chunking keeps each individual request close to the
+already-validated size and makes a partial run resumable (cached
+per-month files, same pattern as 13_extract_bts_hubspoke.py).
+
 Outputs
 -------
-data/raw/faa_hubspoke/noaa_asos_raw.csv          Raw NOAA ASOS download
+data/raw/faa_hubspoke/noaa_asos_raw_YYYY_MM.csv  Raw NOAA ASOS download (per month, cached)
 data/staging/weather_hubspoke_hourly.csv         Normalized hourly weather per airport
 data/raw/faa_hubspoke/manifest.csv               Audit log
 
@@ -30,6 +40,7 @@ python scripts/14_extract_weather_hubspoke.py --study config/study.yaml \\
 """
 
 import argparse
+import calendar
 import csv
 import hashlib
 import io
@@ -42,6 +53,7 @@ import airportsdata
 import pandas as pd
 import requests
 import yaml
+from dateutil.relativedelta import relativedelta
 
 logging.basicConfig(
     level=logging.INFO,
@@ -78,6 +90,26 @@ def resolve_window(study: dict, run_mode_override: str | None) -> tuple[str, str
     start = window.get("start", study.get("study_start"))
     end = window.get("end", study.get("study_end"))
     return run_mode, start, end
+
+
+def months_in_range(start: str, end: str):
+    dt = datetime.strptime(start, "%Y-%m-%d")
+    end_dt = datetime.strptime(end, "%Y-%m-%d")
+    while dt <= end_dt:
+        yield dt.year, dt.month
+        dt += relativedelta(months=1)
+
+
+def month_chunk_bounds(year: int, month: int, overall_start: str, overall_end: str) -> tuple[str, str]:
+    """Clip a calendar month to the overall window, so each NOAA request
+    covers at most one month. Unlike the BTS PREZIP source (whole-month
+    files only), NOAA's request takes exact start/end dates, so there's no
+    reason to over-fetch beyond the configured window at the edges."""
+    first = datetime(year, month, 1)
+    last = datetime(year, month, calendar.monthrange(year, month)[1])
+    start_dt = max(first, datetime.strptime(overall_start, "%Y-%m-%d"))
+    end_dt = min(last, datetime.strptime(overall_end, "%Y-%m-%d"))
+    return start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")
 
 
 def load_discovered_airports(airports_path: Path) -> list[str]:
@@ -159,7 +191,7 @@ def fetch_noaa_asos(stations: list[str], start: str, end: str, session: requests
     for stn in stations:
         param_list.append(("station", stn))
 
-    resp = session.get(IEM_ASOS_URL, params=param_list, timeout=300)
+    resp = session.get(IEM_ASOS_URL, params=param_list, timeout=600)
     resp.raise_for_status()
 
     text = resp.text
@@ -270,7 +302,6 @@ def main():
     out_path = root / args.out
     raw_dir = root / args.raw_dir
     manifest_path = raw_dir / "manifest.csv"
-    raw_file = raw_dir / "noaa_asos_raw.csv"
 
     raw_dir.mkdir(parents=True, exist_ok=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -288,29 +319,47 @@ def main():
     log.info(f"Hub-spoke airport universe: {len(airports)} airports, {len(stations)} ASOS stations")
 
     session = requests.Session()
+    normalized_chunks: list[pd.DataFrame] = []
 
-    if raw_file.exists() and not args.force:
-        log.info(f"Using cached NOAA raw file: {raw_file}")
-        df_raw = pd.read_csv(raw_file, dtype=str, low_memory=False)
-    else:
-        df_raw = fetch_noaa_asos(stations, start, end, session)
-        df_raw.to_csv(raw_file, index=False)
-        append_manifest(manifest_path, {
-            "source": "NOAA_ASOS_IEM_hubspoke",
-            "filename": raw_file.name,
-            "rows": len(df_raw),
-            "extracted_at": datetime.now(timezone.utc).isoformat(),
-            "checksum": checksum(raw_file),
-            "params": f"stations={stations},start={start},end={end}",
-        })
-        log.info(f"Raw NOAA file saved: {raw_file} ({len(df_raw):,} rows)")
-        time.sleep(1)
+    for year, month in months_in_range(start, end):
+        chunk_start, chunk_end = month_chunk_bounds(year, month, start, end)
+        # Cache filename is keyed by run_mode, not just year/month, for the
+        # same reason as 13_extract_bts_hubspoke.py: different run_modes
+        # resolve to different discovered-airport/station lists, so a
+        # year_month-only key would silently reuse a cache built for the
+        # wrong station set.
+        raw_file = raw_dir / f"noaa_asos_raw_{run_mode}_{year}_{month:02d}.csv"
 
-    staging = normalize_noaa(df_raw, station_to_airport, tz_map)
-    if staging.empty:
+        if raw_file.exists() and not args.force:
+            log.info(f"  Using cached {raw_file.name}")
+            df_raw = pd.read_csv(raw_file, dtype=str, low_memory=False)
+        else:
+            try:
+                df_raw = fetch_noaa_asos(stations, chunk_start, chunk_end, session)
+                df_raw.to_csv(raw_file, index=False)
+                append_manifest(manifest_path, {
+                    "source": "NOAA_ASOS_IEM_hubspoke",
+                    "filename": raw_file.name,
+                    "rows": len(df_raw),
+                    "extracted_at": datetime.now(timezone.utc).isoformat(),
+                    "checksum": checksum(raw_file),
+                    "params": f"stations={stations},start={chunk_start},end={chunk_end}",
+                })
+                log.info(f"  Raw NOAA chunk saved: {raw_file} ({len(df_raw):,} rows)")
+                time.sleep(1)
+            except Exception as exc:
+                log.warning(f"  NOAA fetch failed for {year}-{month:02d}: {exc}")
+                continue
+
+        chunk_normalized = normalize_noaa(df_raw, station_to_airport, tz_map)
+        if not chunk_normalized.empty:
+            normalized_chunks.append(chunk_normalized)
+
+    if not normalized_chunks:
         log.error("No NOAA ASOS data after normalization.")
         raise SystemExit(1)
 
+    staging = pd.concat(normalized_chunks, ignore_index=True)
     staging.to_csv(out_path, index=False)
     log.info(f"Weather staging written: {out_path} ({len(staging):,} rows)")
 

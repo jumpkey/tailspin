@@ -1,2 +1,4 @@
 source,filename,rows,extracted_at,checksum,params
 BTS_hubspoke,bts_hubspoke_2024_01.csv,47158,2026-06-16T19:06:38.914423+00:00,c4a5a7f99bed9115,"year=2024,month=1,hubs=['DFW'],run_mode=test"
+BTS_hubspoke,bts_hubspoke_test_2024_01.csv,47158,2026-06-16T20:00:23.441024+00:00,c4a5a7f99bed9115,"year=2024,month=1,hubs=['DFW'],run_mode=test"
+BTS_hubspoke,bts_hubspoke_local_2024_01.csv,130461,2026-06-16T20:06:37.298221+00:00,81f7701c9545f99c,"year=2024,month=1,hubs=['CLT', 'DFW', 'ORD', 'PHL'],run_mode=local"

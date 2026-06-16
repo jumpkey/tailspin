@@ -6,6 +6,18 @@ The purpose of Fragility V is to answer a network-wide management question: **wh
 
 This study should be framed as an outside-in, decision-support engine rather than a narrow complaint analysis. It is intended to produce one executive-ready graphic, but also to generate a reusable scoring dataset and ranking framework that can support broader management and operational interpretation.[cite:194][cite:197]
 
+## Implementation notes (resolved 2026-06-16)
+
+Fragility V depends on Fragility IV's `operator_class` mapping (`config/operator_classes.yaml`) and hub-spoke fact tables (`data/curated/hubspoke_operator_fact/`), both built as part of Fragility IV. **Fragility V implementation has not started** as of this note; it is sequenced after Fragility IV so its hotspot-ranking engine can consume IV's already-classified, already-Parquet-staged data rather than duplicating extraction or operator-mapping work.
+
+The following decisions, made during Fragility IV's implementation, carry forward to V without need for separate re-litigation:
+
+- **Architecture**: the same backend abstraction (`scripts/lib/backend.py`, pandas/duckdb/polars), the same `test`/`local`/`bigrun` run-mode pattern, and the same build-here-bigrun-on-the-server split as Fragility IV — see that spec's "Architecture and build location" note.
+- **Storage**: Parquet, partitioned by `year_month` and `hub_family`, reusing Fragility IV's curated layer directly rather than re-deriving it.
+- **Hotspot score default weights**: equal weights across the six components (`a1..a6 = 1/6`) as the default scenario, configurable.
+- **Robustness layer default**: a fixed battery of 3–5 scenarios (mirroring Fragility III's low/base/high pattern) varying component weights and severity thresholds, rather than an open-ended search — concretely: an equal-weight base case, a weather-emphasis case, a controllable/cascade-emphasis case, and an economic-emphasis case.
+- **Operator ambiguity**: any `SkyWest_unresolved` rows from Fragility IV's resolution pipeline are excluded from operator-concentration rollups (Module B) but retained in hub-level and network-wide rollups (Module C), consistent with how Fragility IV discloses them.
+
 ## Objective
 
 Build a scalable, rerunnable network-wide analysis that identifies and ranks **fragility hotspots** across the AA network using weather, controllable, cascade, and economic-burden dimensions, with sufficient structure to support executive, operator-level, and discipline-specific follow-up.[cite:70][cite:156][cite:194]

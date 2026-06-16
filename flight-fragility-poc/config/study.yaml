@@ -20,3 +20,50 @@ weather_bucket_logic:
 
 use_flightaware: false
 flightaware_mode: "validation_only"
+
+# ---------------------------------------------------------------------------
+# Fragility IV / V: run-mode, backend, and hub-spoke scope controls.
+# See flight_fragility_iv_operator_attribution_spec.md, "Architecture and
+# build location" for the reasoning behind these defaults.
+# ---------------------------------------------------------------------------
+run_mode: "test"          # test | local | bigrun
+backend: "pandas"         # pandas | duckdb | polars
+
+run_mode_hubs:
+  test:  ["DFW"]
+  local: ["DFW", "CLT", "ORD", "PHL"]
+  bigrun: []               # empty == full configured network; set explicitly for a bigrun
+
+run_mode_window:
+  test:   { start: "2024-01-01", end: "2024-01-31" }
+  local:  { start: "2024-01-01", end: "2025-12-31" }
+  bigrun: { start: "2024-01-01", end: "2025-12-31" }
+
+operator_classes_config: "config/operator_classes.yaml"
+
+# combined_fragility_score weights (Fragility IV). Equal-weight default;
+# must remain configurable and disclosed wherever the score is reported.
+combined_fragility_score_weights:
+  w1_cancellation_rate: 0.25
+  w2_severe_delay_rate: 0.25
+  w3_controllable_severe_delay_rate: 0.25
+  w4_late_arriving_severe_delay_rate: 0.25
+
+# economic_burden_proxy baseline used by the hub-spoke expansion (Module B),
+# which has no pre-built peer-carrier route basket at each new hub.
+# Module A (focal corridor) continues to use the existing Fragility III
+# UA/DL peer-carrier baseline unchanged.
+hubspoke_economic_burden_baseline: "aa_system_average"
+
+# Targeted FlightAware AeroAPI validation for OO/YX rows that route-context
+# inference cannot resolve (scripts/15_resolve_operator_ambiguity.py). This
+# is a distinct, narrower reactivation of the FlightAware integration from
+# `use_flightaware` above: it queries one historical flight at a time
+# (GET /history/flights/{ident}) for specific ambiguous instances, never a
+# bulk route-date pull, consistent with flightaware_mode: "validation_only".
+# No-ops safely (writes an empty resolution file) if FLIGHTAWARE_API_KEY is
+# unset, so the rest of the pipeline never depends on a live key being
+# present.
+resolve_operator_ambiguity:
+  enabled: true
+  max_queries: 200   # cap per run, since AeroAPI free-tier has volume limits

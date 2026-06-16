@@ -1,0 +1,63 @@
+{
+  "qa_notes": [
+    "7 operator/hub/weather/period cells have fewer than 30 flights (min_sample_threshold) \u2014 treat their rates as indicative only.",
+    "3,447 flights remain in an unresolved operator-ambiguity label (SkyWest_unresolved / Republic_unresolved) and are excluded from operator-class comparisons; see scripts/15_resolve_operator_ambiguity.py.",
+    "combined_fragility_score weights used: {'w1_cancellation_rate': 0.25, 'w2_severe_delay_rate': 0.25, 'w3_controllable_severe_delay_rate': 0.25, 'w4_late_arriving_severe_delay_rate': 0.25}",
+    "Modules present: ['focal_corridor', 'hub_spoke']"
+  ],
+  "combined_fragility_score_weights": {
+    "w1_cancellation_rate": 0.25,
+    "w2_severe_delay_rate": 0.25,
+    "w3_controllable_severe_delay_rate": 0.25,
+    "w4_late_arriving_severe_delay_rate": 0.25
+  },
+  "modules_present": [
+    "focal_corridor",
+    "hub_spoke"
+  ],
+  "operator_classes_present": [
+    "AA_mainline",
+    "Envoy_operated",
+    "OO_AA_contract",
+    "OO_DL_contract",
+    "OO_UA_contract",
+    "Other_or_non_AA",
+    "PSA_operated",
+    "Republic_unresolved",
+    "SkyWest_unresolved"
+  ],
+  "hub_families_present": [
+    "DFW",
+    "focal_corridor"
+  ],
+  "chart_annotation": "Across the included AA network slices, OO_UA_contract at focal_corridor shows the highest combined fragility score (0.149) among cells with 32 flights.",
+  "top_cell": {
+    "module": "focal_corridor",
+    "operator_class": "OO_UA_contract",
+    "hub_family": "focal_corridor",
+    "weather_bucket": "adverse",
+    "period_flag": "baseline",
+    "flights_total": 32,
+    "cancelled_count": 2,
+    "operated_count": 30,
+    "severe_delay_count": 10,
+    "controllable_cancel_count": 0,
+    "controllable_severe_delay_count": 3,
+    "late_arriving_severe_delay_count": 3,
+    "carrier_delay_minutes_sum": 1045.0,
+    "late_aircraft_delay_minutes_sum": 468.0,
+    "cancellation_rate": 0.0625,
+    "severe_delay_rate": 0.3333,
+    "controllable_cancel_rate": 0.0,
+    "controllable_severe_delay_rate": 0.1,
+    "late_arriving_severe_delay_rate": 0.1,
+    "weather_fragility_rate": 0.375,
+    "baseline_label": "ua_dl_peer_average",
+    "excess_cancelled_vs_baseline": 0.98,
+    "excess_controllable_delay_minutes": 760.3,
+    "excess_cascade_delay_minutes": 72.5,
+    "economic_burden_proxy_usd": 84834.52,
+    "economic_burden_proxy_usd_per_1000_flights": 2651078.7,
+    "combined_fragility_score": 0.149
+  }
+}

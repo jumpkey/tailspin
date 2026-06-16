@@ -1,9 +1,9 @@
-# After Action Report — Flight Fragility POC, Iteration 2
+# After Action Report — Flight Fragility POC, Iterations 2–5
 
-**Date:** 2026-06-15  
-**Agent:** Claude (claude-sonnet-4-6)  
-**Repository:** jumpkey/tailspin  
-**Branch:** claude/trusting-allen-0he9md  
+**Date:** 2026-06-15 (Iteration 2) — 2026-06-16 (Iterations 3–5)
+**Agent:** Claude (claude-sonnet-4-6)
+**Repository:** jumpkey/tailspin
+**Branch:** claude/trusting-allen-0he9md
 **Building on:** Iteration 1 implementation by GitHub Copilot Coding Agent
 
 ---
@@ -696,4 +696,157 @@ alongside.
 
 ---
 
-*End of After Action Report — Iterations 2–4*
+## Fragility IV: Operator Attribution (Iteration 5)
+
+**Date:** 2026-06-16
+**Builds on:** Iterations 2–4 (above) and `flight_fragility_iv_operator_attribution_spec.md`
+
+### What was implemented
+
+Fragility IV asks whether AA's four operating structures — AA mainline, Envoy
+Air, PSA Airlines, and SkyWest/Republic under their resolved mainline
+contracts — show different fragility signatures, in the same focal corridor
+plus a net-new hub-spoke expansion. It is built as two modules sharing one
+operator-attribution methodology, per the spec's "Architecture and build
+location":
+
+- **Module A (focal corridor)** reuses the existing
+  `data/curated/flight_operability_fact.csv` unchanged, adding an
+  `operator_class` column derived from `carrier_code` via
+  `scripts/lib/operator_classify.py` and `config/operator_classes.yaml`. No
+  new extraction was required.
+- **Module B (hub-spoke expansion)** is net-new: `scripts/13_extract_bts_hubspoke.py`
+  and `scripts/14_extract_weather_hubspoke.py` extract BTS and NOAA ASOS data
+  for a configurable hub list (`config/study.yaml` `run_mode_hubs`), with the
+  spoke-market universe discovered directly from the data rather than
+  hand-enumerated. Airport timezone/ICAO-station lookups use the new
+  `airportsdata` package instead of a hand-maintained table, since the
+  spoke-airport set is not known in advance.
+- A `run_mode` framework (`test` / `local` / `bigrun`, `config/study.yaml`)
+  scopes Module B's hub list and date window so the pipeline can be
+  functionally validated inside this sandboxed container (`test`: DFW only,
+  January 2024) before a full run on provisioned infrastructure.
+- `scripts/lib/backend.py` adds an optional pandas/duckdb/polars backend
+  abstraction for the aggregation step, materializing results back to pandas
+  so downstream chart code is backend-agnostic (`config/study.yaml`
+  `backend:`, defaults to `pandas`).
+- **FlightAware AeroAPI was reactivated**, but narrowly: `scripts/15_resolve_operator_ambiguity.py`
+  performs targeted, single-flight historical lookups
+  (`GET /history/flights/{ident}`) only for the OO (SkyWest) / YX (Republic)
+  rows that route-context inference cannot resolve — never a bulk
+  route-date pull. This is a distinct, separately-gated reactivation
+  (`config/study.yaml` `resolve_operator_ambiguity.enabled` +
+  `FLIGHTAWARE_API_KEY`) from the dormant bulk extractor
+  (`12_extract_flightaware.py`, still gated by `use_flightaware: false`,
+  untouched). It no-ops safely (writes an empty resolution file) if the key
+  is absent, so the rest of the pipeline never depends on a live key.
+  Querying the existing Module A fact table directly showed OO already
+  appears in all three pre-validated route baskets (`aa_regional_basket`,
+  `ua_peer_basket`, `dl_peer_basket`), so route-context inference alone
+  resolves ~100% of Module A's OO ambiguity — this targeted FlightAware path
+  is primarily exercised by Module B, where no basket assignment exists yet.
+- `scripts/33_analyze_fragility_operator.py` builds the combined
+  module x operator_class x hub_family x weather_bucket x period_flag
+  scorecard, computing `weather_fragility_rate` (chosen, disclosed
+  definition: `(cancelled_count + severe_delay_count) / flights_total`,
+  since the spec names this metric without a formula) and
+  `combined_fragility_score` (configurable weights,
+  `config/study.yaml` `combined_fragility_score_weights`, default equal
+  0.25 each). The economic-burden proxy reuses Fragility III's
+  excess-vs-baseline-rate x published-cost-benchmark methodology, but with
+  two different baselines as the spec specifies: Module A keeps the existing
+  UA/DL peer-average baseline; Module B has no peer-carrier basket yet at
+  the new hubs, so it uses an AA-system average pooled across included
+  operator classes per hub_family x weather_bucket x period_flag cell
+  (`hubspoke_economic_burden_baseline: "aa_system_average"`, not
+  leave-one-out).
+- `scripts/43_plot_fragility_operator.py` renders the four-panel executive
+  chart (small multiples by hub family, per the spec's guidance to
+  prioritize that over operator-color complexity) and the written summary,
+  reusing the dual plotly/kaleido-then-matplotlib rendering pattern from
+  `40_plot_fragility.py`.
+- `scripts/run_pipeline_iv.sh` orchestrates steps 13→14→15→21→33→43, kept
+  separate from `run_pipeline.sh` per the project's established
+  phase-decoupling convention; it requires `run_pipeline.sh` to have already
+  produced `data/curated/flight_operability_fact.csv` at least once, since
+  Module A reuses that table rather than rebuilding it.
+
+### Bug found and fixed during validation
+
+**`lib.backend.write_partitioned_parquet()` was not idempotent.** pandas'
+`to_parquet(partition_cols=...)` adds new uniquely-named files into an
+existing Hive-partitioned directory rather than replacing its contents. The
+first end-to-end test run produced correct row counts; re-running the same
+`test` slice without `--force` (using cached raw files, the expected normal
+case) silently **doubled** the row counts in `data/staging/bts_hubspoke/`
+and `data/curated/hubspoke_operator_fact/`, because each script run added a
+second set of Parquet files alongside the first instead of replacing them.
+Fixed by clearing the output directory (`shutil.rmtree`) before writing.
+Re-ran the full `test`-mode pipeline twice in a row after the fix to confirm
+row counts now stay constant across repeated runs (47,158 Module B rows
+both times). A second pre-existing issue was found and fixed in the same
+pass: `14_extract_weather_hubspoke.py` ignored `run_mode_window` and always
+requested the full multi-year study window regardless of `run_mode`,
+causing the `test` slice to request 175 ASOS stations x 2 years instead of
+175 stations x 1 month; it now resolves its window the same way
+`13_extract_bts_hubspoke.py` does.
+
+### Validation scope and status
+
+**This is a container-safe `test`-mode structural validation, not a
+statistically meaningful result.** Per the spec's "Architecture and build
+location," this sandboxed container is expected to functionally validate the
+`test` and `local` run modes; a `bigrun` (full configured hub network) is
+expected to run on separately-provisioned infrastructure with the longer
+runtime and storage it requires. The `test` slice used here is DFW only,
+January 2024 — one hub, one month. Module A (focal corridor) in this same
+scorecard run still covers its full original 2024–2025 window, since it
+reuses the existing fact table unchanged; the two modules are therefore on
+different time windows in this `test`-mode run specifically. (`local` mode
+aligns both modules to the same 2024–2025 window and adds CLT/ORD/PHL; that
+run has not yet been executed in this container.)
+
+End-to-end execution (`bash scripts/run_pipeline_iv.sh`) completed without
+errors and produced all expected deliverables. QA output from this run:
+
+- Module B (DFW, January 2024): 47,158 flights. Operator classes:
+  AA_mainline 26,056; Envoy_operated 10,284; Other_or_non_AA 5,981;
+  SkyWest_unresolved 3,441; PSA_operated 1,390; Republic_unresolved 6.
+  Weather buckets: benign 30,762; marginal 9,429; adverse 5,304;
+  unknown 1,663. Departure/arrival weather match rates: 96.3% / 96.0%
+  (slightly below Fragility I-III's ~99% because the discovered spoke-airport
+  set is much larger and includes smaller fields with sparser ASOS coverage).
+- Combined scorecard (Module A + B): 63 operator_class x hub_family x
+  weather_bucket x period_flag cells. 7 cells fall below
+  `min_sample_threshold` (30 flights) and are QA-flagged as indicative only.
+  10,341 flights system-wide remain in an unresolved operator-ambiguity label
+  (`SkyWest_unresolved` / `Republic_unresolved`) and are excluded from
+  operator-class comparisons — expected, since `FLIGHTAWARE_API_KEY` is unset
+  in this container and the targeted-validation step correctly no-opped.
+- `output/fragility_iv_summary.md`'s top-ranked cell by
+  `combined_fragility_score` in this run is `OO_UA_contract` at
+  `focal_corridor` (0.149, 32 flights) — a cell already flagged elsewhere in
+  this report as thin, and not comparable in confidence to a `bigrun` result.
+
+No headline finding is reported for Fragility IV in this AAR section, and
+none should be inferred from the numbers above: a one-hub, one-month Module B
+slice compared against a two-year Module A window is a structural smoke test
+of the pipeline, not evidence about operator fragility. A `local`- or
+`bigrun`-mode execution, with `FLIGHTAWARE_API_KEY` set so the
+operator-ambiguity resolution step is not a no-op, is the next step before
+any result here is reported as a finding (see `LEADERSHIP_READOUT_NOTES.md`,
+which intentionally has no Fragility IV entry yet for this reason).
+
+### Files produced
+
+- `data/curated/hubspoke_operator_fact/` (Hive-partitioned by `year_month`)
+- `output/qa_summary_hubspoke.csv`
+- `output/fragility_iv_operator_chart_data.csv`
+- `output/fragility_iv_operator_scorecard.parquet`
+- `output/fragility_iv_summary.json`
+- `output/fragility_iv_operator_exec_chart.png`
+- `output/fragility_iv_summary.md`
+
+---
+
+*End of After Action Report — Iterations 2–5*

@@ -36,18 +36,76 @@ internal factor, if any, would be responsible.
 Route membership should be validated against observed BTS service; routes with
 fewer than 100 observed flights are excluded from chart buckets.
 
+## Fragility IV: operator attribution and hub-spoke expansion
+
+Fragility I-III ask whether AA's focal-corridor regional service, taken as a
+whole, shows a weather-fragility signature relative to UA/DL peers.
+Fragility IV (`flight_fragility_iv_operator_attribution_spec.md`) asks a
+narrower question: does that signature differ by *which* operating structure
+flew the flight — AA mainline, Envoy Air, PSA Airlines, or SkyWest/Republic
+under their resolved mainline contracts — and does it generalize beyond the
+focal corridor to a hub-spoke expansion at additional AA hubs? It is built as
+two modules sharing one operator-attribution methodology:
+
+- **Module A (focal corridor)** reuses the existing
+  `data/curated/flight_operability_fact.csv` unchanged, adding an
+  `operator_class` column.
+- **Module B (hub-spoke expansion)** is net-new extraction at a configurable
+  set of hubs (`config/study.yaml` `run_mode_hubs`), with the spoke-market
+  universe discovered from the data rather than hand-enumerated.
+
+A `run_mode` setting (`test` / `local` / `bigrun`, `config/study.yaml`) scopes
+Module B's hub list and date window: `test` (DFW only, January 2024) is sized
+for this sandboxed container; `local` (DFW/CLT/ORD/PHL, full 2024-2025) and
+`bigrun` (full configured network, hubs set explicitly) are intended for
+provisioned infrastructure with more runtime and storage. See
+[AAR.md](AAR.md), "Fragility IV: Operator Attribution," for the implementation
+record, a bug found and fixed during validation, and the current validation
+status — a `test`-mode structural smoke test has been run successfully, but no
+`local`- or `bigrun`-scale result exists yet, so no Fragility IV finding is
+reported.
+
 ## Data sources
 
 | Source | Description | Phase |
 |--------|-------------|-------|
-| [BTS TranStats On-Time Performance](https://www.transtats.bts.gov/DL_SelectFields.aspx?gnoyr_VQ=FGJ) | Scheduled / actual times, cancellations, delays | Phase 1 (required) |
-| [NOAA ASOS hourly weather, via Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py) | Hourly airport-level METAR observations (visibility, ceiling, present weather) at every study airport | Phase 1 (required) |
-| [FlightAware AeroAPI](https://www.flightaware.com/aeroapi/portal) | Historical flight-level data | Phase 2 (optional) |
+| [BTS TranStats On-Time Performance](https://www.transtats.bts.gov/DL_SelectFields.aspx?gnoyr_VQ=FGJ) | Scheduled / actual times, cancellations, delays | Phase 1 (required); also used for Fragility IV Module B at a configurable hub list |
+| [NOAA ASOS hourly weather, via Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py) | Hourly airport-level METAR observations (visibility, ceiling, present weather) at every study airport | Phase 1 (required); also used for Fragility IV Module B at the discovered hub-spoke airport universe |
+| [FlightAware AeroAPI](https://www.flightaware.com/aeroapi/portal) | Historical flight-level data | Phase 2 bulk extraction (optional, `use_flightaware`, dormant); separately, targeted single-flight operator-ambiguity validation for Fragility IV (optional, `resolve_operator_ambiguity`, see below) |
 
 The original spec called for FAA ASPM cancellation-with-weather reports as the
 weather source. That system requires a restricted FAA-registered login and,
 even with access, only covers cancelled flights — see [AAR.md](AAR.md) for why
 it was replaced with NOAA ASOS and what changed as a result.
+
+### Operator-class resolution and targeted FlightAware validation
+
+BTS On-Time Performance has no marketing-carrier field distinct from the
+reporting/operating carrier code, so most operator classes (`AA_mainline`,
+`Envoy_operated`, `PSA_operated`) resolve directly from `carrier_code`. Two
+codes are genuinely ambiguous because each flies under more than one
+mainline brand: `OO` (SkyWest: American Eagle/United Express/Delta
+Connection/Alaska Airlines) and `YX` (Republic: American Eagle/United
+Express/Delta Connection). These are resolved in priority order:
+
+1. **Route-context inference** (`scripts/lib/operator_classify.py`) — if the
+   route already belongs to a pre-validated basket
+   (`config/routes.yaml`), that basket assignment implies the mainline
+   contract. This resolves the large majority of Module A's ambiguous rows
+   for free.
+2. **Targeted FlightAware AeroAPI validation** (`scripts/15_resolve_operator_ambiguity.py`)
+   — for rows route-context inference can't resolve (chiefly Module B, which
+   has no pre-built basket), a single-flight historical lookup
+   (`GET /history/flights/{ident}`) inspects that flight's codeshares for an
+   AA/UA/DL/AS-prefixed identifier. This is a narrow, per-flight query, never
+   a bulk historical pull — gated independently of `use_flightaware` by
+   `config/study.yaml`'s `resolve_operator_ambiguity.enabled` and a
+   `max_queries` budget, and a no-op (writes an empty resolution file) if
+   `FLIGHTAWARE_API_KEY` is unset, so the rest of the pipeline never depends
+   on a live key.
+3. Anything still unresolved keeps a `SkyWest_unresolved` / `Republic_unresolved`
+   label and is excluded from operator-class comparisons (disclosed in QA
+   notes and chart-summary caveats).
 
 ## Weather bucket logic
 
@@ -71,35 +129,53 @@ module-level threshold constants).
 ```
 flight-fragility-poc/
   README.md           ← this file
+  AAR.md               ← after-action report: decisions, issues found and fixed, run results
+  LEADERSHIP_READOUT_NOTES.md  ← append-only, phase-by-phase leadership-facing synthesis
   requirements.txt
   .env.example
 
   config/
-    routes.yaml       ← route basket definitions
-    study.yaml        ← study dates, thresholds, feature flags
-    economic_scenarios.yaml  ← Fragility III cost-proxy scenario inputs
+    routes.yaml                ← route basket definitions (Module A)
+    study.yaml                  ← study dates, thresholds, feature flags, run_mode/backend controls
+    economic_scenarios.yaml     ← Fragility III/IV cost-proxy scenario inputs
+    operator_classes.yaml       ← carrier_code -> operator_class mapping (Fragility IV/V)
 
   data/
     raw/
-      bts/            ← monthly BTS raw CSVs + manifest.csv
-      faa/            ← NOAA ASOS raw export + manifest.csv
-      flightaware/    ← FlightAware JSON payloads + manifest.csv (phase 2)
-    staging/          ← normalized per-source staging CSVs
-    curated/          ← integrated flight fact table
+      bts/                      ← monthly BTS raw CSVs + manifest.csv (Module A)
+      faa/                      ← NOAA ASOS raw export + manifest.csv (Module A)
+      flightaware/              ← FlightAware JSON payloads + manifest.csv (phase 2 bulk, optional)
+      bts_hubspoke/              ← monthly BTS raw CSVs + discovered_airports.csv + manifest.csv (Module B)
+      faa_hubspoke/               ← NOAA ASOS raw export + manifest.csv (Module B)
+      flightaware_resolution/    ← targeted single-flight lookups + manifest.csv (Fragility IV operator resolution)
+    staging/                    ← normalized per-source staging CSVs/Parquet
+    curated/
+      flight_operability_fact.csv     ← Module A integrated flight fact table
+      hubspoke_operator_fact/         ← Module B integrated flight fact table (Hive-partitioned Parquet, by year_month)
 
   scripts/
+    lib/
+      backend.py                 ← pandas/duckdb/polars aggregation backend abstraction
+      operator_classify.py       ← operator_class derivation + FlightAware-resolution overrides
     00_setup_dirs.sh                  ← directory setup and config validation
-    10_extract_bts.py                 ← BTS ETL
-    11_extract_faa_weather.py         ← FAA ASPM ETL
-    12_extract_flightaware.py         ← FlightAware ETL (optional)
-    20_build_flight_fact.py           ← integration and fact table
+    10_extract_bts.py                 ← BTS ETL (Module A)
+    11_extract_faa_weather.py         ← NOAA ASOS ETL (Module A)
+    12_extract_flightaware.py         ← FlightAware bulk ETL (phase 2, optional, dormant)
+    13_extract_bts_hubspoke.py        ← BTS ETL (Module B, hub-spoke expansion)
+    14_extract_weather_hubspoke.py    ← NOAA ASOS ETL (Module B)
+    15_resolve_operator_ambiguity.py  ← targeted FlightAware operator-ambiguity validation (Fragility IV)
+    20_build_flight_fact.py           ← integration and fact table (Module A)
+    21_build_hubspoke_fact.py         ← integration and fact table (Module B)
     30_analyze_fragility.py           ← Fragility I aggregation and executive metrics
     31_analyze_fragility_machine.py   ← Fragility II controllable/cascade aggregation
     32_analyze_fragility_money.py     ← Fragility III economic-burden cost proxy
+    33_analyze_fragility_operator.py  ← Fragility IV operator-attribution scorecard (Module A + B)
     40_plot_fragility.py              ← Fragility I chart rendering
     41_plot_fragility_machine.py      ← Fragility II chart rendering
     42_plot_fragility_money.py        ← Fragility III chart rendering
-    run_pipeline.sh                   ← one-command orchestrator
+    43_plot_fragility_operator.py     ← Fragility IV chart rendering
+    run_pipeline.sh                   ← one-command orchestrator, Fragility I-III
+    run_pipeline_iv.sh                ← one-command orchestrator, Fragility IV (requires run_pipeline.sh has run at least once)
 
   output/
     weather_fragility_chart_data.csv           ← Fragility I chart-ready aggregate metrics
@@ -114,7 +190,13 @@ flight-fragility-poc/
     fragility_iii_summary.json                  ← Fragility III executive annotation values
     fragility_iii_summary.md                    ← Fragility III written result summary
     fragility_iii_exec_chart.png                ← Fragility III deliverable PNG chart
-    qa_summary.csv                              ← row counts, join rates, null rates (both studies)
+    fragility_iv_operator_chart_data.csv        ← Fragility IV chart-ready operator-attribution scorecard
+    fragility_iv_operator_scorecard.parquet     ← same scorecard, Parquet (best-effort; CSV is authoritative)
+    fragility_iv_summary.json                   ← Fragility IV executive annotation values
+    fragility_iv_summary.md                     ← Fragility IV written result summary
+    fragility_iv_operator_exec_chart.png        ← Fragility IV deliverable PNG chart
+    qa_summary.csv                              ← row counts, join rates, null rates (Module A)
+    qa_summary_hubspoke.csv                     ← row counts, operator/hub-family counts, null rates (Module B)
 ```
 
 ## Setup
@@ -138,13 +220,19 @@ cp .env.example .env
 ## Running the pipeline
 
 ```bash
-# Full pipeline (single command)
+# Full Fragility I-III pipeline (single command)
 bash scripts/run_pipeline.sh
 
 # With options
 bash scripts/run_pipeline.sh --force               # re-download raw data
 bash scripts/run_pipeline.sh --skip-flightaware    # skip FA extraction
 bash scripts/run_pipeline.sh --study-override config/study_2024_only.yaml
+
+# Fragility IV pipeline (requires run_pipeline.sh has produced
+# data/curated/flight_operability_fact.csv at least once)
+bash scripts/run_pipeline_iv.sh
+bash scripts/run_pipeline_iv.sh --run-mode local   # override study.yaml's run_mode
+bash scripts/run_pipeline_iv.sh --force
 
 # Run individual steps
 python scripts/10_extract_bts.py --routes config/routes.yaml --study config/study.yaml
@@ -156,13 +244,21 @@ python scripts/40_plot_fragility.py
 python scripts/41_plot_fragility_machine.py
 python scripts/32_analyze_fragility_money.py --study config/study.yaml --econ-config config/economic_scenarios.yaml
 python scripts/42_plot_fragility_money.py
+
+# Fragility IV individual steps
+python scripts/13_extract_bts_hubspoke.py --study config/study.yaml
+python scripts/14_extract_weather_hubspoke.py --study config/study.yaml
+python scripts/15_resolve_operator_ambiguity.py --study config/study.yaml
+python scripts/21_build_hubspoke_fact.py --study config/study.yaml
+python scripts/33_analyze_fragility_operator.py --study config/study.yaml
+python scripts/43_plot_fragility_operator.py
 ```
 
 ## Environment variables
 
 | Variable              | Required | Description                                       |
 |-----------------------|----------|---------------------------------------------------|
-| `FLIGHTAWARE_API_KEY` | No       | FlightAware AeroAPI key (phase 2 only; set `use_flightaware: true` in study.yaml) |
+| `FLIGHTAWARE_API_KEY` | No       | FlightAware AeroAPI key. Used by two independently-gated paths: phase 2 bulk extraction (`use_flightaware: true`, dormant) and Fragility IV's targeted single-flight operator-ambiguity validation (`resolve_operator_ambiguity.enabled: true`, `scripts/15_resolve_operator_ambiguity.py`). Both no-op safely if unset. |
 
 ## Idempotency and reproducibility
 
@@ -333,6 +429,26 @@ python scripts/42_plot_fragility_money.py
 > this pipeline's public sources) — see the full caveats in
 > [output/fragility_iii_summary.md](output/fragility_iii_summary.md) and
 > [AAR.md](AAR.md).
+
+### Fragility IV: operator attribution
+
+> **Status: Implemented (Module A + Module B, `scripts/13`–`15`, `21`, `33`,
+> `43`) and validated end-to-end in container-safe `test` run mode (DFW only,
+> January 2024). No `local`- or `bigrun`-scale execution has been performed
+> yet, and no finding is reported here as a result** — see
+> [AAR.md](AAR.md), "Fragility IV: Operator Attribution," for the
+> implementation record, a data-pipeline bug found and fixed during this
+> validation, and why the `test`-mode numbers produced so far are a
+> structural smoke test, not evidence about operator fragility (the test
+> slice's one-hub/one-month Module B window is not comparable in scope or
+> confidence to Module A's existing two-year window). Outputs —
+> [output/fragility_iv_summary.md](output/fragility_iv_summary.md) and
+> [output/fragility_iv_operator_exec_chart.png](output/fragility_iv_operator_exec_chart.png)
+> — exist and render correctly from this validation run, but should be read
+> as a pipeline check, not a study result, until a `local`- or `bigrun`-scale
+> execution is performed (ideally with `FLIGHTAWARE_API_KEY` set, since the
+> operator-ambiguity resolution step is a no-op without it in this
+> container).
 
 See the [After Action Report](AAR.md) for decisions made, issues encountered,
 and next steps.

@@ -1,0 +1,51 @@
+# operator_classes.yaml — Carrier-code-to-operator-class mapping for Fragility IV/V.
+#
+# See flight_fragility_iv_operator_attribution_spec.md, "Implementation notes
+# (resolved 2026-06-16)" for the full methodology and reasoning behind this
+# table.
+#
+# as_of: best available public knowledge as of the date below. Re-verify
+# against current American Airlines Group and SkyWest Inc. public filings
+# before relying on this table for a bigrun execution, since codeshare and
+# capacity-purchase contracts can change.
+as_of: "2026-06-16"
+
+sources:
+  - "American Airlines Group, Inc. public corporate filings (Envoy Air and PSA Airlines disclosed as wholly-owned regional subsidiaries operating exclusively as American Eagle)"
+  - "SkyWest, Inc. FY2024 Form 10-K (filed 2025), https://www.sec.gov/Archives/edgar/data/793733/000155837025000943/skyw-20241231x10k.htm — discloses SkyWest operating simultaneously as United Express (~890 daily departures), Delta Connection (~700), American Eagle (~380), and Alaska Airlines (~220) under separate capacity-purchase agreements"
+  - "Republic Airways public profile/disclosures — discloses Republic operating as American Eagle, United Express, and Delta Connection under separate codeshare/capacity-purchase agreements"
+
+# Unambiguous: a BTS Reporting_Airline (carrier_code) value that maps to
+# exactly one operator class everywhere in the network.
+carrier_code_map:
+  AA:
+    class: AA_mainline
+    confidence: high
+  MQ:
+    class: Envoy_operated
+    confidence: high
+  OH:
+    class: PSA_operated
+    confidence: high
+
+# Ambiguous: a carrier_code that flies under more than one mainline brand,
+# so carrier_code alone cannot resolve operator class. See the resolution
+# pipeline in scripts/15_resolve_operator_ambiguity.py.
+ambiguous_carrier_codes:
+  OO:
+    known_brands: [American_Eagle, United_Express, Delta_Connection, Alaska_Airlines]
+    unresolved_class_label: SkyWest_unresolved
+    resolution_methods:
+      - route_context_inference   # only valid for routes already in a pre-validated basket (config/routes.yaml)
+      - flightaware_validation    # scripts/15_resolve_operator_ambiguity.py, targeted query per ambiguous flight
+  YX:
+    known_brands: [American_Eagle, United_Express, Delta_Connection]
+    unresolved_class_label: Republic_unresolved
+    resolution_methods:
+      - route_context_inference
+      - flightaware_validation
+
+# Default label for any carrier_code not present above (e.g., UA, DL, 9E —
+# peer-carrier codes already handled by the existing basket framing, or any
+# other code encountered in the hub-spoke expansion).
+default_class: Other_or_non_AA

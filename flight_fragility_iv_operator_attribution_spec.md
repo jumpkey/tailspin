@@ -6,6 +6,50 @@ The purpose of Fragility IV is to answer an attribution question that is central
 
 This study must remain careful about causality. It should not claim to know the internal reasons for performance differences, nor should it assert that any operator or operating model is inherently defective. It should instead identify where observable operational symptoms are concentrated and frame constructive, actionable interpretations for airline leadership.[cite:156][cite:153]
 
+## Implementation notes (resolved 2026-06-16)
+
+The items below were open questions or gaps identified during spec review. They are resolved here so the implementation has one authoritative source of truth; the rest of this document is unchanged from the original request.
+
+### Operator-class mapping
+
+BTS On-Time Performance data has no `Operating_Airline` / marketing-carrier field distinct from `Reporting_Airline` — a field referenced in this repo's existing extraction code never actually populates in the downloaded data. Operator class is derived entirely from `Reporting_Airline` (`carrier_code` in this repo's fact tables), which is reliable for two of the three primary classes because Envoy Air (`MQ`) and PSA Airlines (`OH`) are wholly-owned American Airlines Group regional subsidiaries that operate exclusively under the American Eagle brand — a fact disclosed in American Airlines Group's own public corporate filings — so `carrier_code == MQ` or `OH` maps unambiguously to `Envoy_operated` / `PSA_operated` everywhere in the network, with no further disambiguation needed. `carrier_code == AA` maps unambiguously to `AA_mainline`.
+
+Two carrier codes are genuinely ambiguous. SkyWest (`OO`) operates simultaneously as American Eagle, United Express, Delta Connection, **and** Alaska Airlines under separate capacity-purchase agreements — per SkyWest, Inc.'s FY2024 Form 10-K, this is a four-way split (~380/890/700/220 daily departures respectively), not the three-way split assumed earlier in this engagement. Republic Airways (`YX`) operates a comparable three-way split as American Eagle, United Express, and Delta Connection. BTS data alone cannot distinguish which contract a given `OO` or `YX` flight operated under; both are handled identically by the resolution pipeline below.
+
+Resolution approach, in priority order:
+
+1. **Route-context inference where unambiguous.** If a flight's route appears only in a pre-existing, already-validated route basket (e.g., the `aa_regional_basket` routes used in Fragility I–III), that basket assignment already implies the contract. This is a labeling convenience for already-known routes, not new information, and does not extend to markets outside a configured basket.
+2. **Targeted FlightAware AeroAPI validation** (`scripts/15_resolve_operator_ambiguity.py`, new) for `OO`/`YX`-coded rows outside any pre-labeled basket. This reactivates the dormant FlightAware integration already present in this repo (`scripts/12_extract_flightaware.py`, gated by `use_flightaware` in `config/study.yaml`) in a **targeted validation** mode — querying specific ambiguous flights to resolve marketing/operating brand, not a bulk historical pull — consistent with the existing `flightaware_mode: "validation_only"` setting and with FlightAware's free-tier rate/volume limits.
+3. **Unresolved fallback.** Any `OO`/`YX` row that cannot be resolved by (1) or (2) is labeled `SkyWest_unresolved` / `Republic_unresolved` rather than guessed. Unresolved rows are excluded from operator-class comparisons but retained in row counts and disclosed in the QA summary.
+
+The carrier-code-to-class mapping is stored in `config/operator_classes.yaml`, dated and source-noted, in the shape this spec's own example anticipated.
+
+**Equipment-type cross-check (not a primary classifier).** Regional-jet equipment (Embraer/Bombardier family) versus mainline equipment (Boeing/Airbus) is a directionally useful free cross-check — joining BTS `Tail_Number` to the FAA Releasable Aircraft Registry — but does not, by itself, resolve the SkyWest three-way contract ambiguity, since SkyWest flies similarly-sized regional jets for all three of its mainline partners. It is used only as (a) a validation check that `MQ`/`OH` rows are ~100% regional-jet equipment and `AA` rows are ~100% mainline equipment, and (b) a fleet-mix variable relevant to this spec's own "Mix effects" risk. It is not used to assign operator class.
+
+### Hub-spoke market discovery
+
+Rather than hand-enumerating spoke airports per hub, the hub-spoke expansion (Module B) downloads all BTS flights touching each configured hub airport and derives the spoke-market universe, operator mix, and route families directly from the data. This avoids presupposing which spokes exist or which operator serves them, consistent with this study's ab-initio framing, and is implemented as a new extraction path (`scripts/13_extract_bts_hubspoke.py`) that filters BTS PREZIP data to a configurable hub list rather than a fixed route list. It does not reuse or modify the existing 9-airport/14-route raw cache used by Fragility I–III (`data/raw/bts/`); hub-spoke data lands in a separate `data/raw/bts_hubspoke/` / `data/curated/hubspoke_operator_fact/` path so the existing studies' reproducibility carries zero risk from this work.
+
+### Architecture and build location
+
+This container builds and functionally validates the backend-abstracted code (pandas/duckdb/polars) and the `test` and `local` run modes, since neither requires GPU or large memory to validate correctness. The full-network, multi-year `bigrun` execution is reserved for the user's provisioned server (high-core-count, high-RAM, fast local SSD). Backend abstraction (`scripts/lib/backend.py`) is applied at the aggregation/scoring layer (script 33), where backend choice actually matters at scale; the ETL layer remains pandas-based, consistent with Fragility I–III, but writes Parquet (partitioned by `year_month`) instead of CSV for the new hub-spoke curated data.
+
+Concrete run-mode definitions for this study:
+
+| Mode | Hubs | Window | Notes |
+|---|---|---|---|
+| `test` | DFW only | 1 month | Container-safe validation slice |
+| `local` | DFW, CLT, ORD, PHL | full study window (2024-01 – 2025-12) | Default for a normal workstation |
+| `bigrun` | full configured network | all configured years | Reserved for the user's high-core/RAM server |
+
+### Economic burden proxy baseline
+
+Module A (focal corridor) reuses the existing Fragility III peer-carrier (UA/DL) baseline already built for that basket — no behavior change. Module B (hub-spoke expansion) has no pre-built UA/DL peer-route basket at each new hub, so its `economic_burden_proxy` uses baseline #3 (AA-system average across included operator classes in the same `hub_family × weather_bucket` cell) as the counterfactual. Both bases are disclosed by name wherever the metric is reported.
+
+### Combined fragility score weights
+
+Default weights are equal (`w1=w2=w3=w4=0.25`), configurable in `config/study.yaml`, consistent with this spec's "weights must be configurable and clearly documented" requirement. This is a default, not a claim that the four symptoms are equally material.
+
 ## Objective
 
 Build a reproducible, operator-comparison analysis that answers: **Are AA-marketed flights operated by Envoy, PSA, or AA mainline materially different in weather fragility, controllable/cascade fragility, and implied economic burden, both in the focal corridor and in selected comparable hub-spoke portions of the network?**[cite:25][cite:156][cite:194]

@@ -478,4 +478,92 @@ for phase-1 deliverables.
 
 ---
 
-*End of After Action Report — Iteration 2*
+## Fragility II: Controllable and Cascade Disruption (Iteration 3)
+
+**Date:** 2026-06-16
+**Builds on:** Iteration 2 (above) and `flight_fragility_ii_machine_addon_spec.md`
+
+### What was implemented
+
+- Extended `10_extract_bts.py` to capture the five BTS cause-minute fields
+  (`CarrierDelay`, `WeatherDelay`, `NASDelay`, `SecurityDelay`,
+  `LateAircraftDelay`). No new downloads were required — the cached raw
+  monthly files already contained these columns from the original BTS PREZIP
+  download; only the staging-stage field selection needed extending.
+- Extended `20_build_flight_fact.py` to derive `primary_delay_cause`,
+  `controllable_delay_flag`, `controllable_cancel_flag`, `late_arriving_flag`,
+  `cascade_delay_flag`, `controllable_severe_delay_flag`, and
+  `late_arriving_severe_delay_flag`, applying the null-guard rule from the
+  spec: cause-minute fields are null, not zero, for on-time and cancelled
+  flights, so a row only receives a `primary_delay_cause` if at least one
+  cause-minute field is non-null and their sum exceeds zero.
+- Added `scripts/31_analyze_fragility_machine.py` and
+  `scripts/41_plot_fragility_machine.py`, producing a parallel chart-data
+  CSV, executive-summary JSON, written markdown summary, and PNG chart
+  without modifying any Fragility I output.
+- Added a `combined_peer_basket` (UA + DL pooled) series and a per-cell
+  `low_confidence_flag` (operated flight count at or below
+  `min_sample_threshold`, set to 30 in `config/study.yaml`) to address the
+  sample-size risk the spec called out.
+
+### QA results
+
+- **Null-guard check passed**: `cause_data_count` (5,825) exactly matches
+  the count of operated flights with `ArrDelay >= 15` (5,825); zero
+  cancelled flights received a spurious cause assignment. This confirms the
+  fillna(0)-before-idxmax defect identified during spec review is not
+  present in the implementation.
+- **One low-confidence cell**: `ua_peer_basket / adverse / baseline` (30
+  operated flights of 32 total) — the same cell already flagged as thin
+  elsewhere in this document. All adverse-weather ratios in the written
+  summary are marked provisional as a result.
+- **Operating-carrier breakout not implementable**: the spec anticipated
+  breaking out controllable/cascade metrics by operating regional carrier,
+  to test whether an AA-basket effect concentrates in one regional partner
+  or is spread across all of them. The BTS On-Time Performance extract used
+  here reports only the marketing/reporting carrier — already the
+  basket-defining field (AA, UA, DL) — and has no separate operating-carrier
+  identity column, so this breakout could not be built from this data
+  source. Disclosed in `output/fragility_ii_summary.md` as a data-
+  availability limitation, not an oversight.
+
+### Headline results
+
+| Weather  | AA controllable severe-delay rate | Peer avg | Combined peer | AA÷peer avg | AA÷combined peer |
+|----------|-----------------------------------|----------|----------------|-------------|-------------------|
+| Benign   | 2.86%                              | 3.81%    | 3.51%          | 0.75×       | 0.81×             |
+| Marginal | 3.18%                              | 6.02%    | 4.52%          | 0.53×       | 0.70×             |
+| Adverse  | 4.65%                              | 6.35%    | 4.87%          | 0.73× (provisional) | 0.95× (provisional) |
+
+| Weather  | AA late-arriving (cascade) severe-delay rate | Peer avg | Combined peer | AA÷peer avg | AA÷combined peer |
+|----------|-----------------------------------------------|----------|----------------|-------------|-------------------|
+| Benign   | 4.43%                                          | 2.55%    | 2.22%          | 1.74×       | 2.00×             |
+| Marginal | 5.40%                                          | 4.20%    | 3.49%          | 1.28×       | 1.55×             |
+| Adverse  | 8.11%                                          | 5.48%    | 5.31%          | 1.48× (provisional) | 1.53× (provisional) |
+
+Benign-to-adverse escalation in the cascade rate: AA regional 1.83×,
+combined peer basket 2.39×.
+
+**This result is mixed relative to Fragility I, not confirmatory.** The
+controllable (Air Carrier-coded) severe-delay rate is consistently *lower*
+for AA regional than for peers across all three weather buckets, and does
+not show the escalating-with-weather-stress pattern that Fragility I's
+cancellation-rate finding showed. The late-arriving (cascade) severe-delay
+rate is consistently *higher* for AA regional than peers, but its own
+escalation from benign to adverse conditions is smaller for AA (1.83×) than
+for the combined peer basket (2.39×) — the opposite direction from what the
+secondary hypothesis anticipated. Both observations are reported as found;
+see `output/fragility_ii_summary.md` and the spec's "Risks, threats to
+validity, and alternative explanations" section for the full disclosure
+this finding should be read alongside.
+
+### Files produced
+
+- `output/weather_fragility_machine_chart_data.csv`
+- `output/fragility_ii_machine_summary.json`
+- `output/fragility_ii_summary.md`
+- `output/weather_fragility_machine_exec_chart.png`
+
+---
+
+*End of After Action Report — Iterations 2–3*

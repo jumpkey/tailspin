@@ -71,6 +71,11 @@ BTS_REQUIRED_FIELDS = [
     "Distance",
     "ActualElapsedTime",
     "CRSElapsedTime",
+    "CarrierDelay",
+    "WeatherDelay",
+    "NASDelay",
+    "SecurityDelay",
+    "LateAircraftDelay",
 ]
 
 # Staging column rename map: BTS name → normalized name
@@ -93,6 +98,11 @@ BTS_RENAME = {
     "Distance": "distance_miles",
     "ActualElapsedTime": "actual_elapsed_min",
     "CRSElapsedTime": "scheduled_elapsed_min",
+    "CarrierDelay": "carrier_delay_minutes",
+    "WeatherDelay": "weather_delay_minutes",
+    "NASDelay": "nas_delay_minutes",
+    "SecurityDelay": "security_delay_minutes",
+    "LateAircraftDelay": "late_aircraft_delay_minutes",
 }
 
 
@@ -191,6 +201,8 @@ def normalize_bts(df: pd.DataFrame) -> pd.DataFrame:
     numeric_cols = [
         "dep_delay_min", "arr_delay_min", "distance_miles",
         "actual_elapsed_min", "scheduled_elapsed_min",
+        "carrier_delay_minutes", "weather_delay_minutes", "nas_delay_minutes",
+        "security_delay_minutes", "late_aircraft_delay_minutes",
     ]
     for col in numeric_cols:
         if col in df.columns:

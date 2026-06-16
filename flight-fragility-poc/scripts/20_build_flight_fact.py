@@ -166,7 +166,9 @@ def load_bts(path: Path) -> pd.DataFrame:
     if "flight_date" in df.columns:
         df["flight_date"] = pd.to_datetime(df["flight_date"], errors="coerce")
     for col in ("dep_delay_min", "arr_delay_min", "distance_miles",
-                "actual_elapsed_min", "scheduled_elapsed_min"):
+                "actual_elapsed_min", "scheduled_elapsed_min",
+                "carrier_delay_minutes", "weather_delay_minutes", "nas_delay_minutes",
+                "security_delay_minutes", "late_aircraft_delay_minutes"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     for col in ("cancelled_flag", "diverted_flag"):
@@ -364,6 +366,80 @@ def derive_flags(df: pd.DataFrame, study: dict) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Fragility II: controllable / cascade classification
+#
+# BTS only populates the five cause-minute fields for flights that operated
+# and arrived >= 15 minutes late; on-time, early, and cancelled flights report
+# all five as null. Defaulting nulls to zero before taking the largest value
+# would manufacture a spurious "Air Carrier" attribution for every one of
+# those rows (idxmax on an all-zero row returns the first column), so
+# has_cause_data must gate the assignment rather than rely on a zero fill.
+# See flight_fragility_ii_machine_addon_spec.md, "Field population and
+# null-handling rules."
+# ---------------------------------------------------------------------------
+
+CAUSE_COLS = [
+    "carrier_delay_minutes",
+    "weather_delay_minutes",
+    "nas_delay_minutes",
+    "security_delay_minutes",
+    "late_aircraft_delay_minutes",
+]
+
+CAUSE_LABEL_MAP = {
+    "carrier_delay_minutes": "Air Carrier",
+    "weather_delay_minutes": "Weather",
+    "nas_delay_minutes": "NAS",
+    "security_delay_minutes": "Security",
+    "late_aircraft_delay_minutes": "Late-arriving",
+}
+
+
+def derive_fragility_ii_flags(df: pd.DataFrame, study: dict) -> pd.DataFrame:
+    """Derive primary_delay_cause and the controllable/cascade flags."""
+    delay_thresh = study.get("delay_threshold_minutes", 60)
+
+    df = df.copy()
+    for col in CAUSE_COLS:
+        if col not in df.columns:
+            df[col] = np.nan
+
+    has_cause_data = (
+        df[CAUSE_COLS].notna().any(axis=1) & (df[CAUSE_COLS].fillna(0).sum(axis=1) > 0)
+    )
+
+    df["primary_delay_cause"] = None
+    df.loc[has_cause_data, "primary_delay_cause"] = (
+        df.loc[has_cause_data, CAUSE_COLS].idxmax(axis=1).map(CAUSE_LABEL_MAP)
+    )
+
+    df["controllable_delay_flag"] = (df["primary_delay_cause"] == "Air Carrier").astype(int)
+    df["late_arriving_flag"] = (df["primary_delay_cause"] == "Late-arriving").astype(int)
+    df["cascade_delay_flag"] = df["late_arriving_flag"]
+
+    df["controllable_cancel_flag"] = (
+        (df.get("cancelled_flag", pd.Series(0)) == 1) &
+        (df.get("cancellation_code_bts", pd.Series("")) == "A")
+    ).astype(int)
+
+    # Severe-delay definition for Fragility II is an OR of dep/arr delay,
+    # which differs from Fragility I's arrival-only severe_delay_flag — see
+    # spec section "Definitional consistency with Fragility I."
+    severe_either = (
+        (df.get("dep_delay_min", pd.Series(np.nan)) >= delay_thresh) |
+        (df.get("arr_delay_min", pd.Series(np.nan)) >= delay_thresh)
+    )
+    df["controllable_severe_delay_flag"] = (
+        (df["controllable_delay_flag"] == 1) & severe_either
+    ).astype(int)
+    df["late_arriving_severe_delay_flag"] = (
+        (df["late_arriving_flag"] == 1) & severe_either
+    ).astype(int)
+
+    return df
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -416,6 +492,7 @@ def main():
 
     # Derive flags
     fact = derive_flags(fact, study)
+    fact = derive_fragility_ii_flags(fact, study)
 
     # Enforce required column order
     required_cols = [
@@ -426,6 +503,10 @@ def main():
         "wx_dep_visibility", "wx_dep_ceiling", "wx_dep_wxcodes", "wx_dep_wind_kt", "wx_dep_bucket",
         "wx_arr_visibility", "wx_arr_ceiling", "wx_arr_wxcodes", "wx_arr_wind_kt", "wx_arr_bucket",
         "weather_bucket", "market_bucket", "period_flag", "severe_delay_flag", "operated_flag",
+        "carrier_delay_minutes", "weather_delay_minutes", "nas_delay_minutes",
+        "security_delay_minutes", "late_aircraft_delay_minutes", "primary_delay_cause",
+        "controllable_delay_flag", "controllable_cancel_flag", "late_arriving_flag",
+        "cascade_delay_flag", "controllable_severe_delay_flag", "late_arriving_severe_delay_flag",
     ]
     for col in required_cols:
         if col not in fact.columns:
@@ -490,6 +571,48 @@ def main():
         sample_sz["check"] = "sample_size_by_bucket"
         qa_rows.append(sample_sz[["dimension", "row_count", "check"]])
 
+    # Fragility II: cause-data restriction check.
+    # has_cause_data should equal the set of operated flights with ArrDelay >= 15;
+    # any mismatch means the null-guard isn't behaving as documented in the spec.
+    delay_thresh = study.get("delay_threshold_minutes", 60)
+    cause_data_count = int((fact["primary_delay_cause"].notna()).sum())
+    arrdelay15_operated = int(
+        ((fact.get("arr_delay_min", pd.Series(np.nan)) >= 15) &
+         (fact.get("operated_flag", pd.Series(0)) == 1)).sum()
+    )
+    cancelled_with_cause = int(
+        ((fact.get("cancelled_flag", pd.Series(0)) == 1) &
+         (fact["primary_delay_cause"].notna())).sum()
+    )
+    qa_rows.append(pd.DataFrame([
+        {"dimension": "cause_data_count", "row_count": cause_data_count, "check": "fragility_ii_cause_data"},
+        {"dimension": "arrdelay15_operated_count", "row_count": arrdelay15_operated, "check": "fragility_ii_cause_data"},
+        {"dimension": "cause_data_matches_arrdelay15", "row_count": int(cause_data_count == arrdelay15_operated), "check": "fragility_ii_cause_data"},
+        {"dimension": "cancelled_flights_with_spurious_cause", "row_count": cancelled_with_cause, "check": "fragility_ii_cause_data"},
+    ]))
+
+    # Fragility II: controllable / cascade counts by basket
+    if "market_bucket" in fact.columns:
+        cause_by_basket = (
+            fact.groupby("market_bucket")
+            .agg(
+                controllable_delay_count=("controllable_delay_flag", "sum"),
+                controllable_severe_delay_count=("controllable_severe_delay_flag", "sum"),
+                late_arriving_severe_delay_count=("late_arriving_severe_delay_flag", "sum"),
+                controllable_cancel_count=("controllable_cancel_flag", "sum"),
+                operated_count=("operated_flag", "sum"),
+            )
+            .reset_index()
+        )
+        for _, r in cause_by_basket.iterrows():
+            basket = r["market_bucket"]
+            qa_rows.append(pd.DataFrame([
+                {"dimension": f"{basket}/controllable_severe_delay_count", "row_count": int(r["controllable_severe_delay_count"]), "check": "fragility_ii_basket_counts"},
+                {"dimension": f"{basket}/late_arriving_severe_delay_count", "row_count": int(r["late_arriving_severe_delay_count"]), "check": "fragility_ii_basket_counts"},
+                {"dimension": f"{basket}/controllable_cancel_count", "row_count": int(r["controllable_cancel_count"]), "check": "fragility_ii_basket_counts"},
+                {"dimension": f"{basket}/operated_count", "row_count": int(r["operated_count"]), "check": "fragility_ii_basket_counts"},
+            ]))
+
     qa_df = pd.concat(qa_rows, ignore_index=True) if qa_rows else pd.DataFrame()
     qa_df.to_csv(qa_path, index=False)
     log.info(f"QA summary written: {qa_path}")
@@ -502,6 +625,9 @@ def main():
         log.info(f"  Market buckets: {fact['market_bucket'].value_counts().to_dict()}")
     if "weather_bucket" in fact.columns:
         log.info(f"  Weather buckets: {fact['weather_bucket'].value_counts().to_dict()}")
+    log.info(f"  Fragility II cause data: {cause_data_count:,} flights "
+             f"(ArrDelay>=15 operated: {arrdelay15_operated:,}, "
+             f"cancelled w/ spurious cause: {cancelled_with_cause:,})")
 
 
 if __name__ == "__main__":

@@ -87,20 +87,26 @@ flight-fragility-poc/
     curated/          ← integrated flight fact table
 
   scripts/
-    00_setup_dirs.sh           ← directory setup and config validation
-    10_extract_bts.py          ← BTS ETL
-    11_extract_faa_weather.py  ← FAA ASPM ETL
-    12_extract_flightaware.py  ← FlightAware ETL (optional)
-    20_build_flight_fact.py    ← integration and fact table
-    30_analyze_fragility.py    ← aggregation and executive metrics
-    40_plot_fragility.py       ← chart rendering
-    run_pipeline.sh            ← one-command orchestrator
+    00_setup_dirs.sh                  ← directory setup and config validation
+    10_extract_bts.py                 ← BTS ETL
+    11_extract_faa_weather.py         ← FAA ASPM ETL
+    12_extract_flightaware.py         ← FlightAware ETL (optional)
+    20_build_flight_fact.py           ← integration and fact table
+    30_analyze_fragility.py           ← Fragility I aggregation and executive metrics
+    31_analyze_fragility_machine.py   ← Fragility II controllable/cascade aggregation
+    40_plot_fragility.py              ← Fragility I chart rendering
+    41_plot_fragility_machine.py      ← Fragility II chart rendering
+    run_pipeline.sh                   ← one-command orchestrator
 
   output/
-    weather_fragility_chart_data.csv   ← chart-ready aggregate metrics
-    fragility_summary.json             ← executive annotation values
-    qa_summary.csv                     ← row counts, join rates, null rates
-    weather_fragility_exec_chart.png   ← deliverable PNG chart
+    weather_fragility_chart_data.csv           ← Fragility I chart-ready aggregate metrics
+    fragility_summary.json                     ← Fragility I executive annotation values
+    weather_fragility_exec_chart.png            ← Fragility I deliverable PNG chart
+    weather_fragility_machine_chart_data.csv    ← Fragility II chart-ready aggregate metrics
+    fragility_ii_machine_summary.json           ← Fragility II executive annotation values
+    fragility_ii_summary.md                     ← Fragility II written result summary
+    weather_fragility_machine_exec_chart.png    ← Fragility II deliverable PNG chart
+    qa_summary.csv                              ← row counts, join rates, null rates (both studies)
 ```
 
 ## Setup
@@ -137,7 +143,9 @@ python scripts/10_extract_bts.py --routes config/routes.yaml --study config/stud
 python scripts/11_extract_faa_weather.py --routes config/routes.yaml --study config/study.yaml
 python scripts/20_build_flight_fact.py --routes config/routes.yaml --study config/study.yaml
 python scripts/30_analyze_fragility.py --study config/study.yaml
+python scripts/31_analyze_fragility_machine.py --study config/study.yaml
 python scripts/40_plot_fragility.py
+python scripts/41_plot_fragility_machine.py
 ```
 
 ## Environment variables
@@ -210,6 +218,51 @@ python scripts/40_plot_fragility.py
 > above); against Delta alone — the better-sampled peer — the ratio escalates
 > with weather severity: 1.79× (benign) → 2.32× (marginal) → 3.02× (adverse).
 > Full results, sample sizes, and caveats are in [AAR.md](AAR.md).
+
+### Fragility II: controllable and cascade disruption
+
+> **Status: Implemented as an incremental extension of the Fragility I
+> pipeline and run against the same live data.**
+>
+> Fragility I treats all severe delay and cancellation as a single
+> undifferentiated outcome. Fragility II decomposes the same flights using
+> BTS's delay-cause fields to ask two more specific questions: how often is
+> the *primary* disruption cause attributable to the carrier itself
+> (`controllable_severe_delay_rate`), and how often is the flight delayed
+> because of a *late-arriving* upstream aircraft, i.e. cascade disruption
+> (`late_arriving_severe_delay_rate`)? See
+> [output/fragility_ii_summary.md](output/fragility_ii_summary.md) and
+> [AAR.md](AAR.md)'s Iteration 3 section for the full write-up, including
+> the data-availability limitation that prevented a planned breakout by
+> regional operating carrier.
+>
+> Controllable (Air Carrier-coded) severe-delay rate by weather bucket:
+>
+> | Weather  | AA Regional | Peer avg | Combined peer | AA÷Peer avg | AA÷Combined peer |
+> |----------|-------------|----------|----------------|-------------|-------------------|
+> | Benign   | 2.86 %      | 3.81 %   | 3.51 %         | 0.75×       | 0.81×             |
+> | Marginal | 3.18 %      | 6.02 %   | 4.52 %         | 0.53×       | 0.70×             |
+> | Adverse  | 4.65 %      | 6.35 %   | 4.87 %         | 0.73× (provisional) | 0.95× (provisional) |
+>
+> Late-arriving (cascade) severe-delay rate by weather bucket:
+>
+> | Weather  | AA Regional | Peer avg | Combined peer | AA÷Peer avg | AA÷Combined peer |
+> |----------|-------------|----------|----------------|-------------|-------------------|
+> | Benign   | 4.43 %      | 2.55 %   | 2.22 %         | 1.74×       | 2.00×             |
+> | Marginal | 5.40 %      | 4.20 %   | 3.49 %         | 1.28×       | 1.55×             |
+> | Adverse  | 8.11 %      | 5.48 %   | 5.31 %         | 1.48× (provisional) | 1.53× (provisional) |
+>
+> Benign-to-adverse escalation in the cascade rate: AA regional 1.83×,
+> combined peer basket 2.39×. "Provisional" marks ratios built from a cell
+> at or below the `min_sample_threshold` (30 operated flights) — currently
+> only `ua_peer_basket / adverse / baseline`.
+>
+> This result is mixed relative to Fragility I, not confirmatory: AA's
+> controllable severe-delay rate runs consistently *below* peers, while its
+> cascade severe-delay rate runs consistently *above* peers but escalates
+> *less* with weather severity than the peer basket does. Both findings are
+> reported as observed. Full detail, sample sizes, and caveats are in
+> [AAR.md](AAR.md).
 
 See the [After Action Report](AAR.md) for decisions made, issues encountered,
 and next steps.

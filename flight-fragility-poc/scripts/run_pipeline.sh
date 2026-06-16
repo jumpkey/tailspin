@@ -85,10 +85,21 @@ echo "[30] Analyzing fragility..."
 python scripts/30_analyze_fragility.py \
   --study "$STUDY_FILE"
 
-# Step 6 — Render chart
+# Step 6 — Analyze Fragility II controllable/cascade aggregates
 echo ""
-echo "[40] Rendering executive chart..."
+echo "[31] Analyzing Fragility II controllable/cascade disruption..."
+python scripts/31_analyze_fragility_machine.py \
+  --study "$STUDY_FILE"
+
+# Step 7 — Render Fragility I chart
+echo ""
+echo "[40] Rendering Fragility I executive chart..."
 python scripts/40_plot_fragility.py
+
+# Step 8 — Render Fragility II chart
+echo ""
+echo "[41] Rendering Fragility II executive chart..."
+python scripts/41_plot_fragility_machine.py
 
 echo ""
 echo "========================================"
@@ -99,4 +110,8 @@ echo "    output/weather_fragility_chart_data.csv"
 echo "    output/fragility_summary.json"
 echo "    output/qa_summary.csv"
 echo "    output/weather_fragility_exec_chart.png"
+echo "    output/weather_fragility_machine_chart_data.csv"
+echo "    output/fragility_ii_machine_summary.json"
+echo "    output/fragility_ii_summary.md"
+echo "    output/weather_fragility_machine_exec_chart.png"
 echo "========================================"

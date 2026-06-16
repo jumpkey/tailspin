@@ -8,6 +8,7 @@ recent_end:     "2025-12-31"
 
 delay_threshold_minutes: 60
 min_route_flights: 100
+min_sample_threshold: 30
 
 weather_bucket_logic:
   benign:

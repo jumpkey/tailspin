@@ -10,10 +10,12 @@ schedule fragility than comparable peer markets.
 > increase in cancellations and severe delays under marginal or adverse weather
 > than comparable peer markets (United hub spokes, Delta hub spokes)?
 
-The working theory is that a more fragile regional operation leaves an
-observable signature: disruption rates rise more sharply than peers as weather
-conditions deteriorate — consistent with "green crew limitations" or a
-thinner, more weather-sensitive regional operation.
+A more fragile regional operation would leave an observable signature:
+disruption rates rising more sharply than peers as weather conditions
+deteriorate. Public BTS and weather data cannot observe internal crew,
+maintenance, or scheduling decisions directly, so this study tests only for
+that externally observable pattern — it does not identify or test which
+internal factor, if any, would be responsible.
 
 ## Study period
 
@@ -39,22 +41,30 @@ fewer than 100 observed flights are excluded from chart buckets.
 | Source | Description | Phase |
 |--------|-------------|-------|
 | [BTS TranStats On-Time Performance](https://www.transtats.bts.gov/DL_SelectFields.aspx?gnoyr_VQ=FGJ) | Scheduled / actual times, cancellations, delays | Phase 1 (required) |
-| [FAA ASPM Cancelled Flights with Weather](https://www.aspm.faa.gov/aspmhelp/index/ASQP__Cancellations__Cancelled_Flights_with_Weather_Report.html) | Cancelled flights with departure/arrival-hour weather fields | Phase 1 (required) |
+| [NOAA ASOS hourly weather, via Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py) | Hourly airport-level METAR observations (visibility, ceiling, present weather) at every study airport | Phase 1 (required) |
 | [FlightAware AeroAPI](https://www.flightaware.com/aeroapi/portal) | Historical flight-level data | Phase 2 (optional) |
+
+The original spec called for FAA ASPM cancellation-with-weather reports as the
+weather source. That system requires a restricted FAA-registered login and,
+even with access, only covers cancelled flights — see [AAR.md](AAR.md) for why
+it was replaced with NOAA ASOS and what changed as a result.
 
 ## Weather bucket logic
 
-Weather conditions are classified at three levels using FAA ASPM severity
-where available, with a text-descriptor fallback:
+Weather conditions are classified at three levels from NOAA ASOS hourly METAR
+observations at each flight's scheduled departure and arrival airport-hour,
+using thresholds aligned to FAA flight-rule categories (VFR/MVFR/IFR):
 
-| Bucket    | ASPM primary rule                         | Fallback text rule                            |
-|-----------|-------------------------------------------|-----------------------------------------------|
-| `benign`  | Both endpoints ≤ Minor                    | No adverse or marginal keywords               |
-| `marginal`| One endpoint is Moderate                  | Rain, mist, reduced vis/ceiling               |
-| `adverse` | One/both Severe; or both ≥ Moderate       | Fog, thunderstorm, very low vis/ceiling       |
+| Bucket    | Rule                                                                                       |
+|-----------|---------------------------------------------------------------------------------------------|
+| `adverse` | Visibility < 1 SM, or ceiling < 500 ft, or TS/freezing precip/heavy snow/blizzard present    |
+| `marginal`| Visibility < 3 SM, or ceiling < 1000 ft, or rain/snow/fog/mist/drizzle present (without adverse conditions) |
+| `benign`  | All other conditions                                                                         |
 
-The exact threshold logic is in `scripts/20_build_flight_fact.py`
-(`derive_weather_bucket` function and module-level constants).
+A flight's overall `weather_bucket` is the worse of its departure-airport-hour
+and arrival-airport-hour conditions. The exact threshold logic is in
+`scripts/11_extract_faa_weather.py` (`classify_weather_bucket` and the
+module-level threshold constants).
 
 ## Repository layout
 
@@ -71,7 +81,7 @@ flight-fragility-poc/
   data/
     raw/
       bts/            ← monthly BTS raw CSVs + manifest.csv
-      faa/            ← FAA ASPM raw exports + manifest.csv
+      faa/            ← NOAA ASOS raw export + manifest.csv
       flightaware/    ← FlightAware JSON payloads + manifest.csv (phase 2)
     staging/          ← normalized per-source staging CSVs
     curated/          ← integrated flight fact table
@@ -146,17 +156,29 @@ python scripts/40_plot_fragility.py
 
 ## QA acceptance thresholds
 
-- FAA-to-BTS cancelled-flight join rate ≥ 85 % (or documented explanation if lower).
+- NOAA-to-BTS weather-join match rate ≥ 85 % (or documented explanation if lower);
+  the live run achieved 99.3% (departure) / 99.8% (arrival) — see AAR.md.
 - No chart bucket with fewer than 100 flights (sparse routes are flagged in logs).
-- Null rate on `weather_bucket` logged; unknown values indicate unmatched FAA records.
+- Null rate on `weather_bucket` logged; unmatched flights fall into an `unknown`
+  bucket and are excluded from weather-stratified analysis.
 
 ## Caveats and known limitations
 
-- **BTS extraction friction**: TranStats uses form-based downloads without a
-  stable REST API. The extractor uses HTTP POST; if the form structure changes,
-  re-examine field codes in `scripts/10_extract_bts.py`.
-- **FAA ASPM session handling**: ASPM uses ASP.NET ViewState sessions.
-  If extraction fails, check the form-field names in `scripts/11_extract_faa_weather.py`.
+- **BTS extraction friction**: TranStats's form-based download requires
+  ASP.NET ViewState tokens. The extractor instead downloads BTS's pre-built
+  monthly PREZIP archives, which need no session or form fields — see AAR.md
+  Issue 1.
+- **UA peer basket is thin, especially in the 2024 baseline** (426 flights),
+  with the adverse-weather/baseline cell at only 32 flights. Treat UA-specific
+  weather-stratified rates as directional; Delta is the better-sampled peer.
+- **A single regional operator (SkyWest/OO) flies under all three carrier
+  contracts** in this study (AA, UA, and DL). Operator-wide factors are
+  controlled out by the peer comparison; contract-specific factors are not.
+  See AAR.md "Caveats and Limitations" for the full breakdown.
+- **Weather is assigned at endpoint airport-hours, not en route.** En-route
+  conditions (turbulence, frontal passage in flight) are not captured; for
+  short-haul spoke-to-hub flights this is treated as an acceptable
+  simplification.
 - **Route sparsity**: LFT–DFW alone may be too thin for a decisive signal.
   The basket approach addresses this; individual routes below `min_route_flights`
   are flagged in `output/qa_summary.csv`.
@@ -167,28 +189,27 @@ python scripts/40_plot_fragility.py
 
 ## Results summary
 
-> **Status: Pipeline implemented and smoke-tested with synthetic data.**
+> **Status: Pipeline implemented and run against live data for 2024-01-01
+> through 2025-12-31.**
 >
-> The full ETL, integration, analysis, and chart rendering pipeline is
-> implemented and verified runnable.  Committed outputs (`output/`) were
-> generated from **synthetic data only** to validate the pipeline end-to-end;
-> they are not based on live BTS or FAA records.
+> The full ETL, integration, analysis, and chart-rendering pipeline ran
+> end-to-end against real BTS On-Time Performance and NOAA ASOS weather
+> records — see [AAR.md](AAR.md) for the complete run record, including data
+> volumes, join-quality checks, and the full results breakdown.
 >
-> **Re-run the pipeline** in a network-enabled environment to replace these
-> placeholder outputs with actual results:
-> ```bash
-> bash scripts/run_pipeline.sh --force
-> ```
+> Headline result — cancellation rate by weather bucket, AA regional vs. the
+> average of the UA and DL peer baskets:
 >
-> Synthetic smoke-test ratios (illustrative only):
+> | Weather     | AA Regional | UA Peer | DL Peer | Peer avg | AA÷Peer ratio |
+> |-------------|-------------|---------|---------|----------|---------------|
+> | Benign      | 2.09 %      | 1.05 %  | 1.17 %  | 1.11 %   | 1.88×         |
+> | Marginal    | 6.19 %      | 3.27 %  | 2.67 %  | 2.97 %   | **2.08×**     |
+> | Adverse     | 10.08 %     | 6.37 %  | 3.34 %  | 4.86 %   | **2.08×**     |
 >
-> | Weather     | AA Regional | UA Peer | DL Peer | AA÷Peer ratio |
-> |-------------|-------------|---------|---------|---------------|
-> | Benign      | 1.4 %       | 1.2 %   | 1.0 %   | 1.25×         |
-> | Marginal    | 12.8 %      | 5.1 %   | 5.3 %   | **2.46×**     |
-> | Adverse     | 30.0 %      | 10.5 %  | 10.0 %  | **2.92×**     |
->
-> *(These numbers are random-seed artifacts, not real flight data.)*
+> The UA peer basket is the thinner of the two peer comparisons (see Caveats
+> above); against Delta alone — the better-sampled peer — the ratio escalates
+> with weather severity: 1.79× (benign) → 2.32× (marginal) → 3.02× (adverse).
+> Full results, sample sizes, and caveats are in [AAR.md](AAR.md).
 
 See the [After Action Report](AAR.md) for decisions made, issues encountered,
 and next steps.

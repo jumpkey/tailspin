@@ -30,9 +30,12 @@ weather-fragility signature:
 The cancellation rate ratio rises from 1.88× in benign conditions to 2.08×
 in both marginal and adverse conditions. Against Delta alone (the better-sampled
 peer basket) the ratio escalates with weather severity: 1.79× (benign) →
-2.32× (marginal) → **3.02×** (adverse) — a clear hallmark of heightened
-weather-specific fragility, consistent with the "green crew" or thin-regional
-hypothesis.
+2.32× (marginal) → **3.02×** (adverse) — a pattern consistent with a
+weather-specific fragility signature in the regional operation. The public
+data used here cannot identify which internal factor (crew staffing or
+experience, fleet/equipment assignment, schedule buffer design, maintenance
+basing, or another scheduling choice) produces it; see Caveats and Limitations
+below.
 
 ---
 
@@ -333,8 +336,12 @@ severity** — the hallmark of weather-specific operational stress:
 If the elevated AA rate were merely a fixed operational baseline difference
 (better network, different scheduling), the ratio would be approximately
 constant across weather conditions. Instead it escalates: AA's disadvantage
-is disproportionately large in marginal and adverse weather, consistent with
-the "green crew" or thin-regional hypothesis stated in the spec.
+is disproportionately large in marginal and adverse weather — a pattern
+consistent with weather-specific operational sensitivity. As noted above,
+the public data used here cannot distinguish among the internal factors
+(crew, fleet, scheduling, maintenance basing, or other causes) that could
+produce this signature; this study tests only for the externally observable
+pattern, not its internal cause.
 
 ### Key finding: cancellation attribution
 

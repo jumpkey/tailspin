@@ -163,6 +163,12 @@ If not already present in the curated fact table, add the following fields.
 - `late_arriving_flag`: 1 if `primary_delay_cause == Late-arriving aircraft`, else 0.[cite:156][cite:169]
 - `cascade_delay_flag`: same as `late_arriving_flag` for phase 1 of this add-on, unless the repo later implements a more advanced cascade allocation model.[cite:156]
 
+### Field population and null-handling rules
+
+BTS only populates the five cause-minute fields for flights that both operated and arrived 15 or more minutes late; on-time, early, and cancelled flights report all five fields as null, not zero.[cite:156][cite:17] Implementations must not default missing cause-minute fields to zero before selecting the largest value, because doing so manufactures a spurious "Air Carrier" attribution (the first column in most natural orderings) for every on-time and cancelled flight, which would silently overstate `controllable_delay_count` across the entire study.
+
+The required rule is: `primary_delay_cause` is computed only for rows where at least one of the five cause-minute fields is non-null and their sum is greater than zero. All other rows — on-time/early operated flights below the 15-minute reporting threshold, and all cancelled flights — must receive `primary_delay_cause = null` and `controllable_delay_flag = 0` / `late_arriving_flag = 0` by definition, not by an arithmetic coincidence of filling with zero. `controllable_cancel_flag` is derived independently from `cancellation_code_bts` and is unaffected by this rule, since BTS never reports cause-minute breakdowns for cancellations.
+
 ## Fragility II metrics
 
 This study should compute a new set of aggregated metrics, parallel to the first study but focused on controllable and cascade effects.[cite:156][cite:25]
@@ -194,6 +200,17 @@ If the existing implementation already has a strong fact table and enough observ
 - `late_arriving_delay_minutes_share`
 - `controllable_fragility_index = AA_regional controllable severe-delay rate / peer weighted controllable severe-delay rate`
 - `cascade_fragility_index = AA_regional late-arriving severe-delay rate / peer weighted late-arriving severe-delay rate`[cite:156][cite:169]
+
+## Statistical robustness and sample-size handling
+
+Fragility II subsets the flight population twice relative to Fragility I: first to operated flights, then to the smaller subset with a reported cause-minute breakdown (delayed >= 15 minutes). The first study's own results already show some `market_bucket × weather_bucket × period_flag` cells with very small populations — for example, the UA peer basket's adverse-weather/baseline cell contains 32 total flights. Cause-attributed subsets of cells this size will be smaller still, and any rate computed from a low count is unstable and can produce a misleadingly large or small ratio purely from sampling noise.
+
+This study must therefore:
+
+- Report the raw flight count (`flights_total` or `operated_count`, as appropriate to the denominator) alongside every rate in both the chart-ready CSV and the written summary, so a reader can judge precision without recomputing it.
+- Define a minimum-sample threshold (suggested: 30 operated flights, or the prior study's `min_route_flights` configuration value if the implementer prefers a single shared constant) below which a cell's rate is flagged as low-confidence in the output data and is either suppressed from the chart or rendered with a visibly distinct treatment (e.g., hatched bar, footnote marker) rather than presented at face value next to well-sampled cells.
+- Compute a combined-peer-basket sensitivity series (UA and DL pooled, weighted by flight count) alongside the separate UA and DL series, since pooling is the most direct mitigation for the UA basket's known thinness and lets the chart show a stable comparison even where the individual peer baskets cannot support one.
+- Treat any single-cell ratio (such as an executive annotation's "Nx peers" figure) as provisional if either the AA cell or the peer cell it is built from falls below the minimum-sample threshold, and say so explicitly in the annotation or its accompanying footnote rather than presenting a precise-looking multiplier built on a handful of flights.
 
 ## Chart specification
 
@@ -250,6 +267,8 @@ The summary should state:
 2. Whether cascade disruption appears higher, lower, or similar for AA regional vs peers.
 3. Whether the signal strengthens in marginal/adverse weather.
 4. A brief caveat that public data do not distinguish maintenance from crew within Air Carrier causes.[cite:156][cite:153]
+5. The flight-count denominator behind each headline rate, and an explicit note on which `market_bucket × weather_bucket × period_flag` cells fell below the minimum-sample threshold.
+6. A reference to the "Risks, threats to validity, and alternative explanations" section so a reader is pointed to the full disclosure rather than only the headline finding.
 
 ## Implementation architecture
 
@@ -306,7 +325,7 @@ cause_cols = {
 }
 ```
 
-Set `primary_delay_cause` to the label with the highest minute value for flights with any delay minutes.[cite:156][cite:169]
+Set `primary_delay_cause` to the label with the highest minute value, but only for flights where the raw cause-minute fields are not all null (see "Field population and null-handling rules" above). Flights with no reported cause-minute breakdown — on-time/early operated flights and all cancellations — must keep `primary_delay_cause` unset rather than defaulting to a column via a zero-filled tie-break.[cite:156][cite:169]
 
 ### Step 2: classify controllable and cascade flags
 
@@ -344,12 +363,17 @@ label_map = {
     "late_aircraft_delay_minutes": "Late-arriving",
 }
 
-fact["primary_delay_cause"] = (
-    fact[cause_cols]
-    .fillna(0)
+has_cause_data = fact[cause_cols].notna().any(axis=1) & (fact[cause_cols].fillna(0).sum(axis=1) > 0)
+
+fact["primary_delay_cause"] = None
+fact.loc[has_cause_data, "primary_delay_cause"] = (
+    fact.loc[has_cause_data, cause_cols]
     .idxmax(axis=1)
     .map(label_map)
 )
+# has_cause_data is false for on-time/early operated flights (BTS reports cause
+# minutes only when ArrDelay >= 15) and for all cancellations. Those rows keep
+# primary_delay_cause = None rather than defaulting to the first cause column.
 
 fact["controllable_delay_flag"] = (fact["primary_delay_cause"] == "Air Carrier").astype(int)
 fact["late_arriving_flag"] = (fact["primary_delay_cause"] == "Late-arriving").astype(int)
@@ -404,20 +428,26 @@ If the existing repo already has naming conventions for alternate studies, those
 
 Add the following QA checks for Fragility II:
 
-- Count of flights with non-null BTS cause-minute data.
+- Count of flights with non-null BTS cause-minute data, and confirmation that this count is restricted to flights with ArrDelay >= 15 (i.e., that on-time and cancelled flights were not zero-filled into a spurious cause).
 - Share of delayed flights receiving a non-ambiguous `primary_delay_cause`.
 - Count and share of Air Carrier severe delays by basket.
 - Count and share of Late-arriving severe delays by basket.
 - Null rate for reused `weather_bucket` field.
-- Sample sizes for each `market_bucket × weather_bucket × period_flag` bucket.[cite:156][cite:25]
+- Sample sizes for each `market_bucket × weather_bucket × period_flag` bucket, with cells below the minimum-sample threshold explicitly listed.[cite:156][cite:25]
 
-If route-level counts are too sparse for stable estimates, the study should collapse some buckets or rely more heavily on basket-level aggregation.[cite:25]
+If route-level counts are too sparse for stable estimates, the study should collapse some buckets, rely more heavily on basket-level aggregation, or fall back to the combined-peer-basket series described above rather than discard the comparison entirely.[cite:25]
 
-## Risks and interpretation constraints
+## Risks, threats to validity, and alternative explanations
+
+This section exists so that a skeptical outside reviewer — including analysts inside the carrier being studied — can see the study's own account of where it could be wrong, rather than relying on a third party to find these issues later.
 
 ### Cause granularity limitation
 
-Public BTS cause data do not isolate maintenance from crew, fueling, baggage, cleaning, or other airline-controlled factors inside the Air Carrier category.[cite:156][cite:167][cite:169]
+Public BTS cause data do not isolate maintenance from crew, fueling, baggage, cleaning, or other airline-controlled factors inside the Air Carrier category.[cite:156][cite:167][cite:169] An elevated `controllable_*` rate in this study is evidence of elevated *airline-attributed* disruption, not evidence about which specific internal function (maintenance, crew scheduling, ground handling, etc.) is responsible.
+
+### Self-reported cause data
+
+Carriers, not an independent third party, select the cause code for each delayed or cancelled flight in BTS reporting. Coding conventions or thresholds for attributing a delay to "Air Carrier" versus another category could in principle differ across carriers in ways this study cannot detect or adjust for. This is a property of the public data source itself, not of this study's methodology, and should be disclosed alongside any controllable-fragility finding.
 
 ### Cascade ambiguity
 
@@ -426,6 +456,30 @@ Late-arriving aircraft reflects propagated disruption and is analytically useful
 ### Weather interaction
 
 Weather can trigger or amplify later controllable or late-arriving effects, which is why reusing the weather-bucket architecture from Fragility I is important.[cite:156][cite:135][cite:79]
+
+### Regional-operator overlap across baskets
+
+Fragility I documented that a single regional operator (SkyWest, reporting as OO) flies under all three carrier contracts in this study's route baskets — AA, UA, and DL. Any operator-level factor that is consistent across contracts (e.g., a SkyWest-wide crew-scheduling practice) would tend to appear in all three baskets and be controlled out by the AA-vs-peer comparison; any factor specific to the AA contract terms or AA-assigned aircraft would not be controlled out. Fragility II should report controllable and cascade metrics broken out by reporting/operating carrier within each basket wherever sample size allows, so a reviewer can see whether an AA-basket effect is concentrated in a specific regional partner or spread across all of them.
+
+### Route-basket selection was fixed before this study was designed
+
+The AA regional, UA peer, and DL peer route baskets were defined in the first fragility study, before the controllable/cascade question in this add-on was formulated. Fragility II reuses those baskets unchanged rather than redefining or tuning them to fit a controllable-disruption narrative. This sequencing is recorded here so a reviewer can verify that the route selection was not adjusted after the fact to produce a particular result.
+
+### Definitional consistency with Fragility I
+
+Fragility II's recommended severe-delay definition (`ArrDelay >= 60` or `DepDelay >= 60`) is an OR of both delay measures, while Fragility I's `severe_delay_flag` uses arrival delay only. Both use the same 60-minute threshold, but the boolean logic differs. The implementation must document which definition backs each published metric, and should not present `severe_delay_rate` (Fragility I) and `controllable_severe_delay_rate` / `late_arriving_severe_delay_rate` (Fragility II) as directly comparable without that disclosure.
+
+### Alternative, non-causal explanations for an observed gap
+
+If AA regional shows an elevated controllable or cascade rate relative to peers, at least the following non-mutually-exclusive explanations are consistent with that observation and cannot be ruled out by this study's data alone:
+
+- Differences in aircraft age, type, or maintenance-base proximity across the regional fleets operating each basket.
+- Differences in schedule buffer (the slack built into turn times and block times) independent of crew or maintenance quality.
+- Differences in route/airport infrastructure (gate availability, ramp congestion, de-icing capacity) that are airport- or network-specific rather than carrier-specific.
+- Random period-to-period variation; this is partially addressed by comparing both the baseline and recent periods rather than a single pooled window, but a two-period, two-year study cannot fully rule out an unusual year.
+- Reporting-convention differences between carriers in how cause codes are assigned (see "Self-reported cause data" above).
+
+This study does not attempt to adjudicate among these explanations. It reports whether the public-data signature is elevated, and by how much, with the sample sizes and definitions needed for a reader to evaluate the result independently.
 
 ### Causal wording prohibition
 

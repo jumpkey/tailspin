@@ -12,9 +12,9 @@ The deliverable is one executive-ready chart plus supporting CSVs, produced from
 
 ## Business question
 
-The working theory is not that pilot seniority or qualification can be observed directly in public data, but that a more fragile regional operation would leave an observable signature: disruption rates would rise more sharply than peers as weather conditions deteriorate.[cite:70][cite:79][cite:93]
+This project tests one observable pattern: whether disruption rates in AA's regional spoke markets rise more sharply than comparable peer markets as weather conditions deteriorate.[cite:70][cite:79][cite:93]
 
-This project therefore tests for an operational pattern consistent with “green crew limitations” or a thinner, more weather-sensitive regional operation, using hard flight outcome data and independent weather-linked cancellation data.[cite:70][cite:135]
+An escalating, weather-correlated gap between AA regional and its peers would be evidence of a comparatively more fragile regional operation in some respect, but it would not by itself identify which internal factor is responsible — crew staffing or experience, fleet/equipment assignment, schedule buffer design, maintenance basing, or another internal scheduling choice are all consistent with the same external signature. Public BTS and weather data cannot observe internal crew, maintenance, or scheduling decisions directly, so this study tests only the externally observable signature using hard flight outcome data and independent weather-linked data, and does not attempt to adjudicate among the possible internal causes.[cite:70][cite:135]
 
 ## Source data
 

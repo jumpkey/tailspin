@@ -4,18 +4,21 @@ This summary compares observable fragility signals (weather sensitivity, control
 
 ## 1. Are material operator differences observed?
 
-Across the included operator_class x hub_family cells, the weather-fragility-rate spread is 19.8% (highest minus lowest cell, pooled across weather conditions and study periods). Across the included AA network slices, OO_UA_contract at focal_corridor shows the highest combined fragility score (0.149) among cells with 32 flights.
+Across the included operator_class x hub_family cells, the weather-fragility-rate spread is 19.2% (highest minus lowest cell, pooled across weather conditions and study periods). Across the included AA network slices, PSA_operated at ORD shows the highest combined fragility score (0.225) among cells with 186 flights.
 
 ## 2. Which hubs or corridor families are most implicated?
 
 | Hub / corridor family | Mean weather fragility rate across operator classes |
 |---|---|
-| DFW | 13.3% |
+| ORD | 13.3% |
+| DFW | 13.0% |
 | focal_corridor | 11.9% |
+| PHL | 11.2% |
+| CLT | 9.9% |
 
 ## 3. Weather-related, controllable, or cascade-driven?
 
-Of the three component rates averaged across included cells, **Weather (overall fragility)** is highest (12.6%). This indicates where the included data concentrate, not which underlying cause produced it.
+Of the three component rates averaged across included cells, **Weather (overall fragility)** is highest (11.9%). This indicates where the included data concentrate, not which underlying cause produced it.
 
 ## 4. Suggested follow-up domains
 
@@ -26,8 +29,8 @@ Of the three component rates averaged across included cells, **Weather (overall 
 
 ## 5. QA notes
 
-- 7 operator/hub/weather/period cells have fewer than 30 flights (min_sample_threshold) — treat their rates as indicative only.
-- 3,447 flights remain in an unresolved operator-ambiguity label (SkyWest_unresolved / Republic_unresolved) and are excluded from operator-class comparisons; see scripts/15_resolve_operator_ambiguity.py.
+- 18 operator/hub/weather/period cells have fewer than 30 flights (min_sample_threshold) — treat their rates as indicative only.
+- 485,006 flights remain in an unresolved operator-ambiguity label (SkyWest_unresolved / Republic_unresolved) and are excluded from operator-class comparisons; see scripts/15_resolve_operator_ambiguity.py.
 - combined_fragility_score weights used: {'w1_cancellation_rate': 0.25, 'w2_severe_delay_rate': 0.25, 'w3_controllable_severe_delay_rate': 0.25, 'w4_late_arriving_severe_delay_rate': 0.25}
 - Modules present: ['focal_corridor', 'hub_spoke']
 

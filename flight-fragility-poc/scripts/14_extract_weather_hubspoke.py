@@ -45,6 +45,7 @@ import csv
 import hashlib
 import io
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -83,6 +84,11 @@ MARGINAL_CEIL_FT = 1000.0
 
 ADVERSE_WX_TOKENS = frozenset(["TS", "FZ", "BLSN", "+SN", "+RASN", "FC"])
 MARGINAL_WX_TOKENS = frozenset(["RA", "SN", "RASN", "DZ", "FG", "MIFG", "BR", "GS", "PL"])
+
+# Pre-compiled regex for vectorized bucket classification in normalize_noaa();
+# longest tokens first to avoid shorter substrings shadowing longer ones.
+_ADVERSE_WX_RE = "|".join(re.escape(t) for t in sorted(ADVERSE_WX_TOKENS, key=len, reverse=True))
+_MARGINAL_WX_RE = "|".join(re.escape(t) for t in sorted(MARGINAL_WX_TOKENS, key=len, reverse=True))
 
 
 def load_study(study_path: Path) -> dict:
@@ -233,33 +239,19 @@ def fetch_noaa_asos(stations: list[str], start: str, end: str, session: requests
     return df
 
 
-def _derive_ceiling(row: pd.Series) -> float | None:
-    for i in range(1, 5):
-        cov = str(row.get(f"skyc{i}", "M") or "M").strip().upper()
-        ht_str = str(row.get(f"skyl{i}", "M") or "M").strip()
-        if cov in ("BKN", "OVC", "OVX"):
-            try:
-                return float(ht_str)
-            except ValueError:
-                pass
-    return None
-
-
-def classify_weather_bucket(vsby_sm: float | None, ceiling_ft: float | None, wxcodes: str) -> str:
-    wx = str(wxcodes or "").upper()
-    if any(tok in wx for tok in ADVERSE_WX_TOKENS):
-        return "adverse"
-    if vsby_sm is not None and vsby_sm < ADVERSE_VIS_SM:
-        return "adverse"
-    if ceiling_ft is not None and ceiling_ft < ADVERSE_CEIL_FT:
-        return "adverse"
-    if any(tok in wx for tok in MARGINAL_WX_TOKENS):
-        return "marginal"
-    if vsby_sm is not None and vsby_sm < MARGINAL_VIS_SM:
-        return "marginal"
-    if ceiling_ft is not None and ceiling_ft < MARGINAL_CEIL_FT:
-        return "marginal"
-    return "benign"
+def _derive_ceiling_vectorized(df: pd.DataFrame) -> pd.Series:
+    """Vectorized ceiling: first (lowest-indexed) sky layer that is BKN/OVC/OVX.
+    Iterates layer 4 → 1 so that layer 1 overwrites when it qualifies."""
+    ceiling = pd.Series(pd.NA, index=df.index, dtype="Float64")
+    for i in range(4, 0, -1):
+        col_c, col_h = f"skyc{i}", f"skyl{i}"
+        if col_c not in df.columns:
+            continue
+        cov = df[col_c].fillna("M").str.strip().str.upper()
+        ht_raw = df[col_h] if col_h in df.columns else pd.Series("M", index=df.index)
+        ht = pd.to_numeric(ht_raw.replace("M", None), errors="coerce")
+        ceiling = ceiling.where(~cov.isin(["BKN", "OVC", "OVX"]), ht)
+    return ceiling
 
 
 def normalize_noaa(df: pd.DataFrame, station_to_airport: dict[str, str], tz_map: dict[str, str]) -> pd.DataFrame:
@@ -278,36 +270,47 @@ def normalize_noaa(df: pd.DataFrame, station_to_airport: dict[str, str], tz_map:
 
     df["visibility_sm"] = pd.to_numeric(df["vsby"].replace("M", None), errors="coerce")
     df["wind_kt"] = pd.to_numeric(df["sknt"].replace("M", None), errors="coerce")
-    df["ceiling_ft"] = df.apply(_derive_ceiling, axis=1)
+    df["ceiling_ft"] = _derive_ceiling_vectorized(df)
     df["wxcodes"] = df["wxcodes"].replace("M", "").fillna("")
 
-    df["weather_bucket_raw"] = df.apply(
-        lambda r: classify_weather_bucket(r["visibility_sm"], r["ceiling_ft"], r["wxcodes"]),
-        axis=1,
+    # Vectorized bucket classification — avoids per-row apply() overhead
+    wx_upper = df["wxcodes"].str.upper()
+    adverse_mask = (
+        wx_upper.str.contains(_ADVERSE_WX_RE, na=False)
+        | (df["visibility_sm"] < ADVERSE_VIS_SM).fillna(False)
+        | (df["ceiling_ft"] < ADVERSE_CEIL_FT).fillna(False)
     )
+    marginal_mask = (
+        wx_upper.str.contains(_MARGINAL_WX_RE, na=False)
+        | (df["visibility_sm"] < MARGINAL_VIS_SM).fillna(False)
+        | (df["ceiling_ft"] < MARGINAL_CEIL_FT).fillna(False)
+    )
+    df["bucket_rank"] = 0  # benign
+    df.loc[marginal_mask, "bucket_rank"] = 1
+    df.loc[adverse_mask, "bucket_rank"] = 2  # adverse overwrites marginal
 
-    bucket_rank = {"adverse": 2, "marginal": 1, "benign": 0}
+    group_cols = ["airport_code", "obs_date_utc", "obs_hour_utc"]
+    rank_to_bucket = {2: "adverse", 1: "marginal", 0: "benign"}
 
-    def _agg_hour(group: pd.DataFrame) -> pd.Series:
-        worst_rank = group["weather_bucket_raw"].map(bucket_rank).max()
-        worst_bucket = {v: k for k, v in bucket_rank.items()}[worst_rank]
-        all_wx = " ".join(group["wxcodes"].dropna())
-        min_vsby = group["visibility_sm"].min()
-        min_ceil = group["ceiling_ft"].min()
-        max_wind = group["wind_kt"].max()
-        return pd.Series({
-            "visibility_sm": round(min_vsby, 2) if pd.notna(min_vsby) else None,
-            "ceiling_ft": round(min_ceil, 0) if pd.notna(min_ceil) else None,
-            "wxcodes": all_wx.strip(),
-            "wind_kt": round(max_wind, 1) if pd.notna(max_wind) else None,
-            "weather_bucket": worst_bucket,
-        })
-
+    # Native groupby agg for numeric columns; one lambda only for string join
     hourly = (
-        df.groupby(["airport_code", "obs_date_utc", "obs_hour_utc"])
-        .apply(_agg_hour)
+        df.groupby(group_cols)
+        .agg(
+            bucket_rank_max=("bucket_rank", "max"),
+            visibility_sm=("visibility_sm", "min"),
+            ceiling_ft=("ceiling_ft", "min"),
+            wind_kt=("wind_kt", "max"),
+            wxcodes=("wxcodes", lambda x: " ".join(v for v in x if v).strip()),
+        )
         .reset_index()
     )
+    hourly["weather_bucket"] = hourly["bucket_rank_max"].map(rank_to_bucket)
+    hourly = hourly.drop(columns=["bucket_rank_max"])
+
+    hourly["visibility_sm"] = hourly["visibility_sm"].round(2)
+    hourly["ceiling_ft"] = hourly["ceiling_ft"].round(0)
+    hourly["wind_kt"] = hourly["wind_kt"].round(1)
+
     hourly["tz_name"] = hourly["airport_code"].map(tz_map).fillna("America/Chicago")
 
     log.info(f"  Normalized to {len(hourly):,} airport-hour rows")

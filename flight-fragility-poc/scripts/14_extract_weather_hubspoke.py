@@ -64,6 +64,16 @@ log = logging.getLogger(__name__)
 
 IEM_ASOS_URL = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
 
+# IEM applies abuse-prevention throttling: observed in practice as a large
+# request succeeding, then every request immediately afterward coming back
+# 503 or 429 within the same second (too fast to be a real timeout) until
+# some cooldown window passes. Retry those — and transient connection
+# errors/timeouts — with exponential backoff rather than treating the first
+# bad response as a hard failure for that month.
+NOAA_RETRY_STATUS_CODES = {429, 502, 503, 504}
+NOAA_MAX_RETRIES = 5
+NOAA_RETRY_BASE_DELAY_SEC = 30
+
 # Same thresholds as 11_extract_faa_weather.py — see that script's header
 # comment for the rationale (ASPM-era IFR/MVFR/VFR equivalents).
 ADVERSE_VIS_SM = 1.0
@@ -191,8 +201,27 @@ def fetch_noaa_asos(stations: list[str], start: str, end: str, session: requests
     for stn in stations:
         param_list.append(("station", stn))
 
-    resp = session.get(IEM_ASOS_URL, params=param_list, timeout=600)
-    resp.raise_for_status()
+    resp = None
+    for attempt in range(NOAA_MAX_RETRIES + 1):
+        try:
+            resp = session.get(IEM_ASOS_URL, params=param_list, timeout=600)
+            resp.raise_for_status()
+            break
+        except requests.exceptions.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            if status not in NOAA_RETRY_STATUS_CODES or attempt == NOAA_MAX_RETRIES:
+                raise
+            delay = NOAA_RETRY_BASE_DELAY_SEC * (2 ** attempt)
+            log.warning(f"  NOAA returned {status}; retrying in {delay}s "
+                        f"(attempt {attempt + 1}/{NOAA_MAX_RETRIES}) ...")
+            time.sleep(delay)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            if attempt == NOAA_MAX_RETRIES:
+                raise
+            delay = NOAA_RETRY_BASE_DELAY_SEC * (2 ** attempt)
+            log.warning(f"  NOAA request failed ({exc}); retrying in {delay}s "
+                        f"(attempt {attempt + 1}/{NOAA_MAX_RETRIES}) ...")
+            time.sleep(delay)
 
     text = resp.text
     data_lines = [ln for ln in text.splitlines() if not ln.startswith("#")]

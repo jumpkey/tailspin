@@ -1,0 +1,13 @@
+weather_bucket,mode,scenario,excess_cancelled_vs_peer_avg,excess_controllable_delay_minutes,excess_cascade_delay_minutes,excess_delay_minutes_basis,cancellation_equiv_minutes,excess_airline_cost_proxy,excess_passenger_cost_proxy,excess_combined_cost_proxy
+benign,fragility_ii_preferred,low,142.84,-10808.8,46305.3,35496.4,34281.6,2839712.0,40703.83,2880415.83
+benign,fragility_ii_preferred,base,142.84,-10808.8,46305.3,35496.4,51422.4,3576617.26,68086.39,3644703.66
+benign,fragility_ii_preferred,high,142.84,-10808.8,46305.3,35496.4,68563.2,4259568.0,104059.6,4363627.6
+marginal,fragility_ii_preferred,low,68.09,-14279.7,4127.6,-10152.1,16341.6,-812168.0,3610.54,-808557.46
+marginal,fragility_ii_preferred,base,68.09,-14279.7,4127.6,-10152.1,24512.4,-1022925.6,11248.9,-1011676.69
+marginal,fragility_ii_preferred,high,68.09,-14279.7,4127.6,-10152.1,32683.2,-1218252.0,22531.1,-1195720.9
+adverse,fragility_ii_preferred,low,69.43,-5081.1,3903.6,-1177.6,16663.2,-94208.0,9033.27,-85174.73
+adverse,fragility_ii_preferred,base,69.43,-5081.1,3903.6,-1177.6,24994.8,-118654.98,18656.81,-99998.17
+adverse,fragility_ii_preferred,high,69.43,-5081.1,3903.6,-1177.6,33326.4,-141312.0,32148.8,-109163.2
+all,fragility_ii_preferred,low,270.13,-33214.4,52105.6,18891.2,64831.2,1511296.0,48838.07,1560134.07
+all,fragility_ii_preferred,base,270.13,-33214.4,52105.6,18891.2,97246.8,1903477.31,90974.77,1994452.08
+all,fragility_ii_preferred,high,270.13,-33214.4,52105.6,18891.2,129662.4,2266944.0,148553.6,2415497.6

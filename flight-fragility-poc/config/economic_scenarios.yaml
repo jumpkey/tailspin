@@ -1,0 +1,37 @@
+# economic_scenarios.yaml — Fragility III cost-proxy scenario inputs.
+#
+# See flight_fragility_iii_show_me_the_money_addon_spec.md for the full
+# methodology and source citations for each benchmark below.
+
+# "fragility_ii_preferred": cost the excess controllable + cascade severe-
+#   delay minutes (BTS cause-minute fields). Falls back to "overall" if
+#   Fragility II outputs / fields are unavailable.
+# "overall": cost total excess arrival-delay minutes without cause
+#   decomposition (Fragility I basis only).
+mode: "fragility_ii_preferred"
+
+value_of_time_per_hour:
+  low: 35.0
+  base: 47.0
+  high: 60.0
+
+airline_block_cost_per_min:
+  low: 80.0
+  base: 100.76
+  high: 120.0
+
+cancellation_equivalent_minutes:
+  low: 240
+  base: 360
+  high: 480
+
+# No passenger-manifest or seat-count data exists in this pipeline's public
+# sources, so the implementation stays in flight-level burden mode (Mode 1
+# in the spec) rather than guessing a passengers-per-flight multiplier.
+estimated_passengers_per_flight:
+  low: null
+  base: null
+  high: null
+
+cost_mode: "combined"
+stratify_by_weather: true

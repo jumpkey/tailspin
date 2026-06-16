@@ -101,6 +101,17 @@ echo ""
 echo "[41] Rendering Fragility II executive chart..."
 python scripts/41_plot_fragility_machine.py
 
+# Step 9 — Analyze Fragility III economic-burden cost proxy
+echo ""
+echo "[32] Analyzing Fragility III economic impact..."
+python scripts/32_analyze_fragility_money.py \
+  --study "$STUDY_FILE"
+
+# Step 10 — Render Fragility III chart
+echo ""
+echo "[42] Rendering Fragility III executive chart..."
+python scripts/42_plot_fragility_money.py
+
 echo ""
 echo "========================================"
 echo "  Pipeline complete."
@@ -115,4 +126,8 @@ echo "    output/fragility_ii_machine_summary.json"
 echo "    output/fragility_ii_summary.md"
 echo "    output/fragility_ii_operator_breakdown.csv"
 echo "    output/weather_fragility_machine_exec_chart.png"
+echo "    output/fragility_iii_chart_data.csv"
+echo "    output/fragility_iii_summary.json"
+echo "    output/fragility_iii_summary.md"
+echo "    output/fragility_iii_exec_chart.png"
 echo "========================================"

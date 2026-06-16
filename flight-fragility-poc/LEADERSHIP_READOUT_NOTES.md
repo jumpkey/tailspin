@@ -228,3 +228,141 @@ execution factor, a route-specific factor, or some combination.
 - Fragility III scope and any further pass are not yet defined; this file
   should gain a new dated entry, not a rewrite of this one, when that work
   produces results worth carrying into the final read-out.
+
+---
+
+## Entry 2 — Fragility III synthesis (2026-06-16)
+
+### Source data
+
+- `AAR.md` "Fragility III: Economic Impact Estimation (Iteration 4)."
+- `output/fragility_iii_summary.md` (full write-up and caveats).
+- `output/fragility_iii_chart_data.csv`, `output/fragility_iii_summary.json`
+  (weather-stratified and scenario-level detail behind the headline figures
+  below).
+- `config/economic_scenarios.yaml` (scenario assumptions and benchmark
+  sourcing pointers).
+
+### A. Top-level (CEO-level) read-out notes
+
+**What this adds to Entry 1.** Fragility III attaches a defensible,
+benchmark-based dollar range to the controllable/cascade pattern Entry 1
+described qualitatively. Base case: an estimated **$1.99M** excess economic
+burden over the two-year study window (range **$1.56M–$2.42M** across
+low/high cost-benchmark scenarios), computed as AA regional's excess
+controllable + cascade delay-minute burden relative to what the UA/DL
+peer-average rate would predict for AA's own flight volume, plus a
+separately-scenario'd cancellation-equivalent burden. This is a public-
+benchmark proxy (A4A airline block-time cost, DOT/FAA value-of-time
+guidance) — not audited revenue, voucher, or reaccommodation expense, and
+not scaled by an actual passenger count, since no passenger-manifest data
+exists in this pipeline's public sources.
+
+**The sharper CEO-level question this raises.** Decomposing the dollar
+figure by weather bucket shows it is not a weather-stress cost: essentially
+all of the net positive burden (+18,891 excess minutes basis; ~$3.6M
+base-case burden on that bucket alone) is concentrated in the
+*benign*-weather bucket, while marginal and adverse weather each run
+*negative* on this same basis — AA's combined controllable+cascade minutes
+fall *below* the peer-average expectation once weather deteriorates. Put
+plainly: the dollar exposure this study can measure is a baseline /
+everyday-conditions cost, not a foul-weather cost. That is a sharper and,
+arguably, a less comfortable framing than "AA's network struggles when
+weather is bad" — it says AA's regional spokes in this basket carry a
+measurable structural cost under *normal* operating conditions, and weather
+stress does not meaningfully add to it on this basis. As in Entry 1, this
+study's data cannot say why (schedule buffer, connection design, station
+execution, or something else) — only that the pattern, now denominated in
+dollars, is concentrated where a "weather fragility" framing would not
+predict it to be.
+
+**Why this strengthens, not just restates, Entry 1's framing.** The
+controllable component of the cost basis is negative (AA's carrier-
+attributed delay minutes run below the peer-average expectation), which is
+the same direction as Fragility II's controllable-rate finding and
+continues to argue against a maintenance/crew explanation. The cascade
+component is the larger, positive driver. Both observations now carry a
+dollar magnitude a CEO-level reader can weigh against remediation cost,
+rather than only a percentage-point comparison.
+
+### B. Executive discipline head notes (AA)
+
+- **Finance / Corporate Planning.** This is the first point in the study
+  where a dollar figure exists to weigh against any proposed remediation
+  spend. Worth knowing: the figure is most useful as an order-of-magnitude
+  prioritization signal (cascade-side schedule resilience is the
+  dollar-material lever; the controllable side is already a net positive
+  for AA in this comparison), not as a budget line — see caveats below.
+- **Network Planning / Scheduling.** Entry 1 asked whether scheduled turn
+  time or block time at these spokes is tighter than peers' independent of
+  weather. Fragility III sharpens the stakes of that question: the dollar
+  exposure is concentrated in benign-weather operations specifically, which
+  is exactly the condition under which a schedule-buffer or connectivity-
+  resilience gap (rather than a weather-contingency gap) would be expected
+  to show up.
+- **Integrated Operations Control / Hub Ops (DFW) and Dispatch /
+  Meteorology.** No new dollar-specific finding for these disciplines
+  beyond Entry 1's; the cost lens does not change which hub- or dispatch-
+  level questions are open, since this pass did not decompose the cost
+  basis by airport or by time-of-day.
+- **Scope note for all AA discipline heads.** This pass computed the cost
+  proxy at the AA-regional-basket level only. It does not break the dollar
+  figure out by regional operator (Envoy/PSA/SkyWest) — see section C
+  below for why that matters specifically for Envoy, and the "Open items"
+  note on a possible operator-level extension.
+
+### C. Envoy Air CEO and discipline head notes
+
+**What this study has not computed, stated plainly.** Fragility III's cost
+proxy was built at the AA-regional-basket level, the same grain as
+Fragility I and II's headline tables — it does not allocate any portion of
+the $1.99M base-case (or $1.56M–$2.42M range) figure to Envoy, PSA, or
+SkyWest specifically. No operator-level dollar breakdown exists yet.
+
+**What can be inferred, with appropriate hedging, from Entry 1's operator
+table.** Entry 1 already showed Envoy (MQ) and PSA (OH) carrying the AA
+basket's high-and-escalating-cascade profile, while SkyWest (OO) within the
+same basket showed a low, flat cascade rate. Since Fragility III's net
+positive cost basis is driven by the basket's cascade component, it is
+*consistent with* — though this study has not directly tested — that
+component being disproportionately attributable to Envoy's and PSA's
+segments of the network rather than SkyWest's. This is an inference worth
+testing, not a finding; the appropriate next step, if useful, is an
+operator-level extension of the cost-proxy calculation (grouping by
+`carrier_code` the same way Fragility II's operator breakdown does),
+which has not been built in this pass and should not be presented to
+Envoy without that direct computation.
+
+**Questions this raises for Envoy specifically, stated as questions, pending
+that direct computation:**
+
+- **Network / Scheduling and Finance (joint).** If an operator-level cost
+  breakdown confirms the inference above, does AA's block-schedule
+  allocation to Envoy's routes in this basket carry a quantifiable
+  recovery-buffer gap relative to SkyWest's allocation on the same basket —
+  and if so, what would closing that gap plausibly be worth against the
+  dollar figure here?
+- **Safety & Quality / Regulatory.** The caveat from Entry 1 still applies
+  at full force: this data does not support a claim that Envoy's or PSA's
+  maintenance or crew performance is worse than SkyWest's, and that remains
+  true with a dollar figure attached — the controllable-cost component
+  points the opposite direction.
+
+### Open items / caveats to carry into any final read-out
+
+- **Candidate addition, not yet built**: an operator-level (`carrier_code`)
+  extension of `scripts/32_analyze_fragility_money.py`, mirroring Fragility
+  II's `aggregate_by_operator()`, would let the dollar figure be split
+  across Envoy/PSA/SkyWest the same way the rate-based metrics already are
+  in `output/fragility_ii_operator_breakdown.csv`. Flagged here as the most
+  directly useful next computation for the Envoy-specific read-out, not
+  authorized or implemented in this pass.
+- All caveats in `output/fragility_iii_summary.md` section 5 apply with
+  full force to every dollar figure in this entry, in particular: these are
+  benchmark-based proxies, not audited financials; the passenger-time
+  component is a flight-level proxy not scaled by actual passenger counts;
+  and the cancellation-equivalent-minutes assumption is a scenario lever,
+  not an observed fact.
+- Any further pass beyond Fragility III (not yet defined) should gain its
+  own new dated entry below this one, per the same append-only convention
+  used for this entry.

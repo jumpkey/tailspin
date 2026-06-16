@@ -77,6 +77,7 @@ flight-fragility-poc/
   config/
     routes.yaml       ← route basket definitions
     study.yaml        ← study dates, thresholds, feature flags
+    economic_scenarios.yaml  ← Fragility III cost-proxy scenario inputs
 
   data/
     raw/
@@ -94,8 +95,10 @@ flight-fragility-poc/
     20_build_flight_fact.py           ← integration and fact table
     30_analyze_fragility.py           ← Fragility I aggregation and executive metrics
     31_analyze_fragility_machine.py   ← Fragility II controllable/cascade aggregation
+    32_analyze_fragility_money.py     ← Fragility III economic-burden cost proxy
     40_plot_fragility.py              ← Fragility I chart rendering
     41_plot_fragility_machine.py      ← Fragility II chart rendering
+    42_plot_fragility_money.py        ← Fragility III chart rendering
     run_pipeline.sh                   ← one-command orchestrator
 
   output/
@@ -107,6 +110,10 @@ flight-fragility-poc/
     fragility_ii_summary.md                     ← Fragility II written result summary
     fragility_ii_operator_breakdown.csv         ← Fragility II controllable/cascade by regional operator
     weather_fragility_machine_exec_chart.png    ← Fragility II deliverable PNG chart
+    fragility_iii_chart_data.csv                ← Fragility III chart-ready cost-proxy data
+    fragility_iii_summary.json                  ← Fragility III executive annotation values
+    fragility_iii_summary.md                    ← Fragility III written result summary
+    fragility_iii_exec_chart.png                ← Fragility III deliverable PNG chart
     qa_summary.csv                              ← row counts, join rates, null rates (both studies)
 ```
 
@@ -147,6 +154,8 @@ python scripts/30_analyze_fragility.py --study config/study.yaml
 python scripts/31_analyze_fragility_machine.py --study config/study.yaml
 python scripts/40_plot_fragility.py
 python scripts/41_plot_fragility_machine.py
+python scripts/32_analyze_fragility_money.py --study config/study.yaml --econ-config config/economic_scenarios.yaml
+python scripts/42_plot_fragility_money.py
 ```
 
 ## Environment variables
@@ -275,6 +284,55 @@ python scripts/41_plot_fragility_machine.py
 > appears for SkyWest under its DL contract, suggesting an operator-level
 > rather than AA-contract-specific signature for SkyWest specifically. Full
 > detail, sample sizes, and caveats are in [AAR.md](AAR.md).
+
+### Fragility III: economic impact estimation
+
+> **Status: Implemented as a third add-on per
+> `flight_fragility_iii_show_me_the_money_addon_spec.md`, run against the
+> same live data.**
+>
+> Fragility III converts the excess disruption Fragility I and II already
+> measured into a scenario-based dollar-burden proxy, using published public
+> cost benchmarks (A4A's 2024 airline block-time cost, DOT/FAA passenger
+> value-of-time guidance) rather than internal accounting data. It runs in
+> the spec's "Fragility II-preferred" mode: the cost basis is excess
+> controllable (carrier-attributed) delay minutes plus excess cascade
+> (late-aircraft) delay minutes, using BTS's own reported cause-minute
+> fields, with a separate scenario-based cancellation-equivalent-minutes
+> lever for excess cancellations. See
+> [output/fragility_iii_summary.md](output/fragility_iii_summary.md) for
+> the full write-up and caveats.
+>
+> | Component | Excess vs. peer-average rate (study window) |
+> |---|---|
+> | Cancellations | 270 flights |
+> | Controllable (carrier-attributed) delay minutes | -33,214 min |
+> | Cascade (late-aircraft) delay minutes | 52,106 min |
+> | **Net excess delay-minutes basis** | **18,891 min** |
+>
+> | Scenario | Airline operating-time burden | Passenger-time burden (flight-level proxy) | Combined |
+> |---|---|---|---|
+> | Low  | $1,511,296 | $48,838  | $1,560,134 |
+> | Base | $1,903,477 | $90,975  | **$1,994,452** |
+> | High | $2,266,944 | $148,554 | $2,415,498 |
+>
+> The controllable component is negative — AA regional's carrier-attributed
+> delay minutes run below the peer-average expectation, consistent with
+> Fragility II's controllable-rate finding — while the larger, positive
+> cascade component drives the net total. That net total is also not spread
+> evenly across weather: nearly all of it is concentrated in the
+> *benign*-weather bucket, while marginal and adverse weather each run
+> negative on this basis. The economic burden this study can attach to AA's
+> elevated cascade exposure therefore presents as a baseline/schedule-
+> resilience cost rather than a weather-stress cost — see
+> [output/fragility_iii_summary.md](output/fragility_iii_summary.md) section 4.
+>
+> These are scenario-based proxies built from published benchmarks, not
+> audited revenue, voucher, or reaccommodation expense, and they are not
+> scaled by an actual passenger count (no passenger-manifest data exists in
+> this pipeline's public sources) — see the full caveats in
+> [output/fragility_iii_summary.md](output/fragility_iii_summary.md) and
+> [AAR.md](AAR.md).
 
 See the [After Action Report](AAR.md) for decisions made, issues encountered,
 and next steps.

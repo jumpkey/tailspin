@@ -597,4 +597,103 @@ data and cause-granularity caveats apply at this finer grain.
 
 ---
 
-*End of After Action Report — Iterations 2–3*
+## Fragility III: Economic Impact Estimation (Iteration 4)
+
+**Date:** 2026-06-16
+**Builds on:** Iterations 2–3 (above) and `flight_fragility_iii_show_me_the_money_addon_spec.md`
+
+### What was implemented
+
+- Added `scripts/32_analyze_fragility_money.py` and
+  `scripts/42_plot_fragility_money.py`, producing a chart-ready cost-proxy
+  CSV, executive-summary JSON, written markdown summary, and PNG chart
+  without modifying any Fragility I or II output.
+- Added `config/economic_scenarios.yaml` with low/base/high cost
+  coefficients (passenger value of time, airline block-time cost,
+  cancellation-equivalent minutes), matching the spec's example defaults
+  exactly: `$35/$47/$60` per hour, `$80/$100.76/$120` per minute,
+  `240/360/480` minutes per excess cancellation.
+- Implemented the spec's "Fragility II-preferred" mode: the cost basis is
+  excess controllable (carrier-attributed) delay minutes plus excess
+  cascade (late-aircraft) delay minutes, computed directly from BTS's
+  reported cause-minute fields (`carrier_delay_minutes`,
+  `late_aircraft_delay_minutes`) rather than from severe-delay-rate
+  proxies — a stronger and more direct mapping to the spec's "convert
+  excess disruption into excess minutes" step. An "overall" fallback mode
+  (Fragility I arrival-delay-minutes basis, no cause decomposition) is
+  implemented and used automatically if the cause-minute fields are ever
+  unavailable.
+- Excess is computed at market_bucket x weather_bucket grain (periods
+  combined to preserve sample size) plus a pooled "all weather" row used
+  for the headline scenario chart, per the spec's "stratify_by_weather"
+  configuration flag.
+- Cancellations are costed separately from delay minutes via a
+  configurable cancellation-equivalent-minutes scenario lever (not an
+  observed fact), exactly matching the spec's Tier 4 costing approach.
+- Implemented the spec's "Mode 1: flight-level burden only" passenger-cost
+  framing throughout — no passengers-per-flight multiplier is applied,
+  since no passenger-manifest or seat-count data exists in this pipeline's
+  public sources. This is disclosed explicitly in the written summary
+  rather than silently assumed.
+
+### QA results
+
+- **Peer benchmark confirmed**: the same UA/DL peer-average rates reported
+  in Fragility I and II are reused as the costing counterfactual, not
+  independently recomputed.
+- **Negative-excess values shown, not hidden**: the controllable delay-
+  minutes component is negative (AA runs below the peer-average
+  expectation) and is reported as a negative number throughout the chart
+  data, summary JSON, and written summary, per the spec's QA requirement
+  to show negative values explicitly when AA outperforms peers.
+- **Scenario parameters verified against config**: low/base/high cost
+  coefficients in the written summary and chart match
+  `config/economic_scenarios.yaml` exactly.
+- **Mode used is logged and disclosed**: both the console output and
+  `output/fragility_iii_summary.md` section 1 state which mode
+  (`fragility_ii_preferred` or `overall`) was actually used for the run.
+- **Full pipeline rerun verified**: running `scripts/run_pipeline.sh`
+  end-to-end reproduces identical Fragility I and II numbers alongside the
+  new Fragility III outputs — this iteration does not alter any prior
+  output.
+
+### Headline results
+
+| Component | Excess vs. peer-average rate (study window) |
+|---|---|
+| Cancellations | 270 flights |
+| Controllable (carrier-attributed) delay minutes | -33,214 min |
+| Cascade (late-aircraft) delay minutes | 52,106 min |
+| **Net excess delay-minutes basis** | **18,891 min** |
+
+| Scenario | Airline operating-time burden | Passenger-time burden (flight-level proxy) | Combined |
+|---|---|---|---|
+| Low  | $1,511,296 | $48,838  | $1,560,134 |
+| Base | $1,903,477 | $90,975  | **$1,994,452** |
+| High | $2,266,944 | $148,554 | $2,415,498 |
+
+**This result sharpens, rather than restates, Fragility II's finding.** The
+controllable component is negative — consistent with AA regional's
+below-peer controllable severe-delay rate — while the larger, positive
+cascade component drives the net total, so the two components do not net
+to zero. Breaking the net total out by weather bucket shows it is not
+evenly distributed: benign weather alone accounts for essentially all of
+the positive net (+35,496 minutes, ~$3.6M base-case burden), while marginal
+and adverse weather each run *negative* on this basis (AA below the
+peer-average expectation once weather deteriorates). The economic burden
+this study can attach to AA's elevated cascade exposure therefore presents
+as a baseline/schedule-resilience cost rather than a weather-stress cost —
+see `output/fragility_iii_summary.md` section 4 for the full breakdown and
+section 5 for the complete caveat list this finding should be read
+alongside.
+
+### Files produced
+
+- `output/fragility_iii_chart_data.csv`
+- `output/fragility_iii_summary.json`
+- `output/fragility_iii_summary.md`
+- `output/fragility_iii_exec_chart.png`
+
+---
+
+*End of After Action Report — Iterations 2–4*

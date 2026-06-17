@@ -363,6 +363,143 @@ that direct computation:**
   component is a flight-level proxy not scaled by actual passenger counts;
   and the cancellation-equivalent-minutes assumption is a scenario lever,
   not an observed fact.
-- Any further pass beyond Fragility III (not yet defined) should gain its
-  own new dated entry below this one, per the same append-only convention
-  used for this entry.
+- Any further pass beyond Fragility V should gain its own new dated entry
+  below Entry 3, per the same append-only convention.
+
+---
+
+## Entry 3 — Fragility IV + V synthesis (2026-06-17)
+
+### Source data
+
+- `output/fragility_iv_summary.md`, `output/fragility_iv_summary.json`
+- `output/fragility_iv_operator_chart_data.csv`
+- `output/fragility_v_summary.md`, `output/fragility_v_summary.json`
+- `output/fragility_v_hotspot_rankings.csv`, `output/fragility_v_hub_rollup.csv`,
+  `output/fragility_v_operator_rollup.csv`
+- `AAR.md` Iterations 6–7.
+
+### A. Top-level (CEO-level) read-out notes
+
+**What Fragility IV adds to the prior three passes.** Fragility IV is the first time
+this study attributes observable fragility signals to specific operating structures
+across a four-hub, 24-month network slice (3.59M flights, Jan 2024–Dec 2025). The
+prior three passes measured the focal corridor (LFT and nearby spokes into DFW) in
+aggregate; Fragility IV asks whether the same signature varies by which carrier
+operated the flight.
+
+**The core new finding: cascade dominates the highest-scoring cell, as it did in the
+focal corridor.** The highest combined fragility score among cells meeting the minimum
+sample threshold belongs to PSA-operated flights at ORD in adverse weather during the
+2025 recent period (combined score 0.225; 186 flights). That cell shows a 22.6%
+cancellation rate, a 39.6% severe delay rate, and — the dominant component — a 21.5%
+late-arriving (cascade) severe delay rate versus only a 6.3% controllable rate. The
+controllable-low / cascade-high signature observed in the focal corridor in
+Fragility I–III reappears here at a different hub, a different operator, and a
+different weather condition. It is not confined to the original corridor.
+
+**What this does and does not say.** The combined score ranks cells by a composite of
+four weighted components; it does not isolate a single cause. PSA_operated at ORD
+adverse/recent being top-ranked reflects a combination of high cancellation rate,
+high severe delay rate, and a cascade-dominated breakdown. The economic burden proxy
+for that cell is $581,540 (base scenario) for a 186-flight cohort. That is not a
+network-wide aggregate; it is the gross burden estimate for that specific cell.
+Comparison across operators or hubs at different weather exposures carries the usual
+mix-effect caveats.
+
+**What Fragility V adds: this pattern is not isolated to one corridor or hub.**
+Fragility V scores all 1,304 (hub × spoke × operator_class) cells and finds the
+top-20 hotspots concentrated heavily in DFW (50%) and ORD (45%), with CLT at zero.
+PSA_operated accounts for 67% of the resolved-operator slots in the top-20;
+AA_mainline accounts for the remaining 33%. The highest-scoring individual cell
+(ORD–SPI, SkyWest_unresolved, base score 0.978) has a robustness score of 1.00 —
+it remains in the top-N under all four scenario weightings. The absence of CLT from
+the top-20 suggests the hotspot concentration is specific to the DFW and ORD hub
+structures rather than being uniformly distributed.
+
+**The dominant signature across the top-20 is economic burden and cascade, not
+weather sensitivity.** Of the top-20 cells, the dominant component is
+economic_burden in 7 cells and cascade in 5, versus weather_sensitivity in only
+1 cell. This is consistent with the Fragility III finding that the focal corridor's
+economic burden concentrated in benign-weather conditions — the network-wide pattern
+suggests excess cascade and economic burden, not purely weather-driven disruption,
+is the dominant fragility signal at the cells that rank highest.
+
+**The CEO-level framing this now supports.** The study has measured the focal
+corridor (Fragility I–III), attributed the pattern by operator within the corridor
+and at expanded hubs (Fragility IV), and ranked the full 4-hub × 239-spoke ×
+operator-class network by a systematic scoring engine (Fragility V). The
+controllable-low / cascade-high / economic-burden-concentrated pattern that emerged
+from the focal corridor appears as the dominant signature in the top-scoring cells
+at a network scale. Whether to characterize this as a scheduling/network-design
+question, a contract-structure question, or a specific-hub question is a management
+judgment this study's public data cannot resolve; but the convergence across five
+passes and four hubs argues it is worth internal examination.
+
+### B. Executive discipline head notes (AA)
+
+- **Network Planning / Scheduling.** Fragility V's top-20 are 95% DFW and ORD with
+  zero CLT representation. That concentration suggests the fragility signature,
+  whatever its source, is hub-specific rather than system-wide — worth knowing
+  whether DFW and ORD have distinctly different regional spoke scheduling
+  structures (turn times, bank architecture, equipment routing) than CLT. The
+  PSA-at-ORD top cell's dominant cascade component in adverse weather is a new
+  data point for that DFW/ORD vs. CLT comparison.
+- **Integrated Operations Control / Hub Ops.** DFW accounts for half the top-20
+  hotspot cells. This warrants understanding: is the hub-level IOC handling of
+  regional-spoke disruptions at DFW structurally different from CLT or PHL? The
+  AA_mainline cells in the top-20 (5 of 15 resolved-operator slots, all DFW) are
+  notable — this is not purely a regional-carrier story at DFW.
+- **Finance / Corporate Planning.** The economic burden proxy at the top Fragility
+  IV cell (PSA at ORD, $581K for one 186-flight adverse-weather cohort) is a
+  single-cell estimate. A network-wide dollar figure could be computed by summing
+  the economic burden component across the top-N cells in
+  `fragility_v_hotspot_rankings.csv`; that aggregation has not been done here and
+  is flagged as the next useful extension for a Finance read-out.
+- **Regional / Express Division oversight.** PSA's presence across both Fragility
+  IV's top cell (ORD, adverse) and 67% of Fragility V's resolved-operator top-20
+  is the most concrete operator-level finding this study has produced. It is
+  consistent with — but does not prove — that PSA's operational or scheduling
+  footprint at ORD and other hubs carries excess fragility relative to the
+  comparison. The appropriate next step is a direct PSA vs. AA_mainline comparison
+  at identical hub-spoke-weather cells to control for the different route universes
+  they serve.
+
+### C. Envoy Air CEO and discipline head notes
+
+**What Fragility IV and V do not show for Envoy.** Neither the top-scoring
+Fragility IV cell nor any of the Fragility V top-20 cells is attributed to
+Envoy_operated. Envoy is present in the curated dataset (458,554 flights) but does
+not rank highly in either pass's composite scoring. This does not contradict
+Fragility I–III's focal-corridor findings about Envoy's cascade profile; it
+suggests that, at a network scale with more hub-spoke diversity, other cells score
+higher on the combined hotspot metric. The absence of Envoy from the top-20 is a
+result that should be reported to any Envoy-facing read-out: the network-wide
+hotspot analysis does not single Envoy out as the system's highest-ranked
+fragility source.
+
+**What remains to be said.** The Fragility I–II operator-level decomposition in the
+focal corridor (Entry 1) still stands: Envoy's cascade profile in the focal
+corridor was elevated relative to SkyWest on the same routes. That finding has not
+changed and is still the relevant Envoy-specific observation from this study. It is
+now accompanied by a network context showing that, outside the focal corridor, the
+highest-scoring cells are PSA-at-ORD rather than Envoy.
+
+### Open items / caveats to carry into any final read-out
+
+- The 485,006 SkyWest_unresolved / Republic_unresolved flights are excluded from
+  the Fragility IV operator comparisons and the Fragility V operator concentration
+  rollup. If a `FLIGHTAWARE_API_KEY` is provided in a future run, the resolution
+  step would reduce this ambiguity; the top-ranked Fragility V cell (ORD-SPI,
+  SkyWest_unresolved, score 0.978) would then resolve to a specific operator class.
+- The Fragility V network-wide economic burden sum (total dollar estimate across all
+  scored cells) has not been computed. It is derivable from
+  `fragility_v_hotspot_rankings.csv` and would be a useful addition for a Finance
+  or CEO read-out.
+- These local-mode results cover DFW/CLT/ORD/PHL. A `bigrun` mode extending to
+  additional AA hubs (e.g., MIA, LAX, PHX) would expand the coverage; the pipeline
+  supports this with only a config change to `run_mode_hubs` in `config/study.yaml`.
+- All caveats from Entries 1–2 continue to apply: self-reported BTS cause codes,
+  no internal operational records, economic burden is a public-benchmark proxy not
+  audited financials, mix effects across operator-class route universes, and
+  small-sample caveats for individual cell numbers.

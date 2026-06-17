@@ -176,6 +176,9 @@ flight-fragility-poc/
     43_plot_fragility_operator.py     ← Fragility IV chart rendering
     run_pipeline.sh                   ← one-command orchestrator, Fragility I-III
     run_pipeline_iv.sh                ← one-command orchestrator, Fragility IV (requires run_pipeline.sh has run at least once)
+    run_pipeline_v.sh                 ← one-command orchestrator, Fragility V (requires run_pipeline_iv.sh has run at least once)
+    34_analyze_fragility_hotspots.py  ← Fragility V network hotspot scoring engine (Modules A–E)
+    44_plot_fragility_hotspots.py     ← Fragility V executive chart rendering
 
   output/
     weather_fragility_chart_data.csv           ← Fragility I chart-ready aggregate metrics
@@ -195,6 +198,14 @@ flight-fragility-poc/
     fragility_iv_summary.json                   ← Fragility IV executive annotation values
     fragility_iv_summary.md                     ← Fragility IV written result summary
     fragility_iv_operator_exec_chart.png        ← Fragility IV deliverable PNG chart
+    fragility_v_hotspot_scorecard.parquet/      ← Fragility V hotspot scores, all cells (Hive-partitioned by hub_family)
+    fragility_v_hotspot_rankings.csv            ← Fragility V top-N ranked cells with all component scores
+    fragility_v_exec_chart.png                  ← Fragility V executive chart (stacked hotspot scorecard)
+    fragility_v_hub_rollup.csv                  ← Fragility V hub concentration in top-N
+    fragility_v_operator_rollup.csv             ← Fragility V operator concentration in top-N (resolved operators only)
+    fragility_v_scenario_robustness.csv         ← Fragility V robustness scores across all scenarios
+    fragility_v_summary.json                    ← Fragility V executive annotation values
+    fragility_v_summary.md                      ← Fragility V written prioritization memo
     qa_summary.csv                              ← row counts, join rates, null rates (Module A)
     qa_summary_hubspoke.csv                     ← row counts, operator/hub-family counts, null rates (Module B)
 ```
@@ -252,6 +263,15 @@ python scripts/15_resolve_operator_ambiguity.py --study config/study.yaml
 python scripts/21_build_hubspoke_fact.py --study config/study.yaml
 python scripts/33_analyze_fragility_operator.py --study config/study.yaml
 python scripts/43_plot_fragility_operator.py
+
+# Fragility V pipeline (requires run_pipeline_iv.sh has run and produced
+# data/curated/hubspoke_operator_fact/)
+bash scripts/run_pipeline_v.sh
+bash scripts/run_pipeline_v.sh --run-mode local   # override study.yaml's run_mode
+
+# Fragility V individual steps
+python scripts/34_analyze_fragility_hotspots.py --study config/study.yaml
+python scripts/44_plot_fragility_hotspots.py
 ```
 
 ## Environment variables
@@ -433,22 +453,48 @@ python scripts/43_plot_fragility_operator.py
 ### Fragility IV: operator attribution
 
 > **Status: Implemented (Module A + Module B, `scripts/13`–`15`, `21`, `33`,
-> `43`) and validated end-to-end in container-safe `test` run mode (DFW only,
-> January 2024). No `local`- or `bigrun`-scale execution has been performed
-> yet, and no finding is reported here as a result** — see
-> [AAR.md](AAR.md), "Fragility IV: Operator Attribution," for the
-> implementation record, a data-pipeline bug found and fixed during this
-> validation, and why the `test`-mode numbers produced so far are a
-> structural smoke test, not evidence about operator fragility (the test
-> slice's one-hub/one-month Module B window is not comparable in scope or
-> confidence to Module A's existing two-year window). Outputs —
+> `43`) and run end-to-end at local-mode scale (DFW/CLT/ORD/PHL, Jan 2024–Dec 2025,
+> 3.59M flights).** See [AAR.md](AAR.md) "Fragility IV" for the implementation
+> record, three data-pipeline bugs found and fixed during local-mode execution
+> (NOAA rate-limiting, cache-key collision, normalize_noaa() performance), and
+> the full QA and results detail.
+>
+> Headline result: PSA_operated at ORD shows the highest combined fragility score
+> (0.225) among cells meeting the minimum sample threshold — 186 flights in
+> adverse weather during the 2025 recent period, with a 22.6% cancellation rate,
+> 39.6% severe delay rate, and a cascade (late-arriving) severe delay rate of
+> 21.5% vs. a controllable rate of 6.3%. The cascade-dominant, controllable-low
+> signature observed in the original focal corridor appears here at a different
+> hub and operator, extending the observation beyond the original corridor.
+>
+> 485,006 flights remain in unresolved operator-ambiguity labels
+> (SkyWest_unresolved / Republic_unresolved) and are excluded from operator-class
+> comparisons — expected, since `FLIGHTAWARE_API_KEY` is unset and the
+> targeted-validation step correctly no-ops. See
 > [output/fragility_iv_summary.md](output/fragility_iv_summary.md) and
-> [output/fragility_iv_operator_exec_chart.png](output/fragility_iv_operator_exec_chart.png)
-> — exist and render correctly from this validation run, but should be read
-> as a pipeline check, not a study result, until a `local`- or `bigrun`-scale
-> execution is performed (ideally with `FLIGHTAWARE_API_KEY` set, since the
-> operator-ambiguity resolution step is a no-op without it in this
-> container).
+> [output/fragility_iv_operator_exec_chart.png](output/fragility_iv_operator_exec_chart.png).
+
+### Fragility V: network hotspot engine
+
+> **Status: Implemented (`scripts/34`, `44`, `run_pipeline_v.sh`) and run at
+> local-mode scale, consuming the Fragility IV curated layer directly.**
+>
+> Fragility V scores all 1,304 (hub_family × spoke_airport × operator_class)
+> cells from the Fragility IV curated data using a six-component composite
+> hotspot score (cancellation rate, severe-delay rate, controllable severe-delay
+> rate, cascade severe-delay rate, adverse-weather fragility rate, economic
+> burden per 1,000 flights), with 4 robustness scenarios and a persistence
+> check. 1,070 of 1,304 cells meet the min-flights threshold (100) and are
+> ranked.
+>
+> Headline results: DFW and ORD together account for 95% of the top-20 hotspot
+> cells; CLT accounts for 0%. Among resolved operators, PSA_operated holds 67%
+> of the top-20 slots. The dominant fragility signature across the top-20 is
+> economic burden (7 cells) and cascade (5 cells), not weather sensitivity
+> (1 cell). 3 of the top-20 cells are persistent (top-20 in both the 2024
+> baseline and 2025 recent periods). See
+> [output/fragility_v_summary.md](output/fragility_v_summary.md) and
+> [output/fragility_v_exec_chart.png](output/fragility_v_exec_chart.png).
 
 See the [After Action Report](AAR.md) for decisions made, issues encountered,
 and next steps.

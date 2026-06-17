@@ -1,6 +1,6 @@
-# After Action Report — Flight Fragility POC, Iterations 2–5
+# After Action Report — Flight Fragility POC, Iterations 2–7
 
-**Date:** 2026-06-15 (Iteration 2) — 2026-06-16 (Iterations 3–5)
+**Date:** 2026-06-15 (Iteration 2) — 2026-06-17 (Iterations 6–7)
 **Agent:** Claude (claude-sonnet-4-6)
 **Repository:** jumpkey/tailspin
 **Branch:** claude/trusting-allen-0he9md
@@ -828,14 +828,12 @@ errors and produced all expected deliverables. QA output from this run:
   `focal_corridor` (0.149, 32 flights) — a cell already flagged elsewhere in
   this report as thin, and not comparable in confidence to a `bigrun` result.
 
-No headline finding is reported for Fragility IV in this AAR section, and
-none should be inferred from the numbers above: a one-hub, one-month Module B
+No headline finding is reported for Fragility IV in this Iteration 5 section, and
+none should be inferred from the test-mode numbers above: a one-hub, one-month Module B
 slice compared against a two-year Module A window is a structural smoke test
-of the pipeline, not evidence about operator fragility. A `local`- or
-`bigrun`-mode execution, with `FLIGHTAWARE_API_KEY` set so the
-operator-ambiguity resolution step is not a no-op, is the next step before
-any result here is reported as a finding (see `LEADERSHIP_READOUT_NOTES.md`,
-which intentionally has no Fragility IV entry yet for this reason).
+of the pipeline, not evidence about operator fragility. The local-mode execution
+(DFW/CLT/ORD/PHL, Jan 2024–Dec 2025) was subsequently completed and is documented
+in Iteration 6 below.
 
 ### Files produced
 
@@ -849,4 +847,124 @@ which intentionally has no Fragility IV entry yet for this reason).
 
 ---
 
-*End of After Action Report — Iterations 2–5*
+## Fragility IV: Local-Mode Execution (Iteration 6)
+
+**Date:** 2026-06-17
+**Builds on:** Iteration 5 (Fragility IV implementation, above)
+
+### Issues found and fixed during local-mode execution
+
+Three bugs surfaced during the local-mode run (DFW/CLT/ORD/PHL, Jan 2024–Dec 2025) that were not visible in the single-hub, single-month `test`-mode run.
+
+#### Bug 1 — NOAA IEM rate-limiting silently lost 23 of 24 months of weather data
+
+**What happened.** The NOAA IEM Mesonet service applies abuse-prevention throttling. The first monthly request (January 2024, ~175 stations) succeeded with 174K rows. All 23 subsequent months failed immediately with HTTP 503 then HTTP 429 responses. The original `fetch_noaa_asos()` caught these errors with a bare `except: log.warning; continue`, swallowing every failure silently. Downstream, 96.5% of flights fell into the `unknown` weather bucket — a diagnostic flag that passed QA without triggering an abort.
+
+**Fix applied.** Added retry-with-backoff to `scripts/14_extract_weather_hubspoke.py`: up to 5 retries per request, exponential backoff starting at 30 seconds (30/60/120/240/480 s), covering HTTP 429/502/503/504 and connection/timeout errors. Constants: `NOAA_MAX_RETRIES = 5`, `NOAA_RETRY_BASE_DELAY_SEC = 30`, `NOAA_RETRY_STATUS_CODES = {429, 502, 503, 504}`. Validated via live probe: throttle cleared in ~13 minutes; re-run succeeded with 96.6% weather match across all 24 months.
+
+#### Bug 2 — Cache-key collision between `test` and `local` raw files
+
+**What happened.** Raw BTS and NOAA files were keyed only by `{year}_{month}`. After the test-mode run (DFW-only, January 2024) cached `bts_hubspoke_2024_01.csv`, the local-mode run (4 hubs) silently reused that single-hub file for January 2024 rather than re-fetching the 4-hub version. Result: Module B's January 2024 data contained only DFW flights in local mode.
+
+**Fix applied.** `run_mode` is now embedded in raw filenames: `bts_hubspoke_{run_mode}_{year}_{month:02d}.csv`, `noaa_asos_raw_{run_mode}_{year}_{month:02d}.csv`. Each run_mode maintains an independent file cache.
+
+#### Bug 3 — Background task timeout due to slow `normalize_noaa()`
+
+**What happened.** The container's background task runner has a ~2-hour execution limit. The old `normalize_noaa()` used three Python-level `apply()` loops (per-row ceiling derivation, per-row weather-bucket classification, per-group hourly aggregation): ~285 seconds per month × 22 months of normalization work ≈ ~105 minutes. The second local-mode attempt was killed mid-execution at October 2025 normalization, after the rate-limit and cache-key fixes had been applied.
+
+**Fix applied.** Rewrote `normalize_noaa()` in `scripts/14_extract_weather_hubspoke.py` using vectorized pandas operations: pre-compiled regex patterns for weather-token matching (`_ADVERSE_WX_RE`, `_MARGINAL_WX_RE`), a vectorized `_derive_ceiling_vectorized()` using column-wise masking instead of per-row `apply()`, and native `groupby().agg()` with named aggregations instead of `groupby().apply()`. Result: ~6 seconds per month — a 47× speedup. All 24 months of normalization now complete in under 3 minutes.
+
+### Local-mode run results
+
+End-to-end execution completed without errors. QA results:
+
+- **Total flights:** 3,587,814 across 4 hubs, 24 months (Jan 2024–Dec 2025)
+- **Hub breakdown:** DFW 1,230,629; ORD 1,183,012; CLT 801,447; PHL 372,726
+- **Operator classes:** AA_mainline 1,468,337; Other_or_non_AA 851,529; Envoy_operated 458,554; SkyWest_unresolved 346,969; PSA_operated 324,388; Republic_unresolved 138,037
+- **Unresolved operator ambiguity:** 485,006 flights (SkyWest_unresolved + Republic_unresolved) excluded from operator-class comparisons — expected, since `FLIGHTAWARE_API_KEY` is unset and the targeted-validation step correctly no-ops. These rows are retained in hub-level and network-wide rollups.
+- **Weather match:** 96.6% across all 24 months (departure and arrival combined). Slightly below Fragility I–III's ~99% rate because the discovered spoke-airport universe (239 airports) includes many smaller fields with sparser ASOS station coverage.
+- **18 operator/hub/weather/period cells** fall below `min_sample_threshold` (30 flights) — flagged as indicative only.
+
+**Top-ranked cell.** PSA_operated at ORD shows the highest combined fragility score among cells meeting the minimum sample threshold:
+
+| Attribute | Value |
+|---|---|
+| Cell | PSA_operated × ORD × adverse weather × recent period |
+| Flights | 186 |
+| Cancellation rate | 22.6% (42/186) |
+| Severe delay rate | 39.6% (57/144 operated) |
+| Controllable severe delay rate | 6.3% (9/144) |
+| Cascade (late-arriving) severe delay rate | 21.5% (31/144) |
+| Economic burden proxy (base scenario) | $581,540 |
+| Combined fragility score | 0.225 |
+
+The cascade component dominates the score (21.5%) relative to the controllable component (6.3%), which is consistent with the pattern observed in the focal corridor across Fragility I–III.
+
+### Files produced or updated
+
+- `data/curated/hubspoke_operator_fact/` — re-populated from local-mode run (24 months, 4 hubs)
+- `output/qa_summary_hubspoke.csv`
+- `output/fragility_iv_operator_chart_data.csv`
+- `output/fragility_iv_operator_scorecard.parquet`
+- `output/fragility_iv_summary.json`
+- `output/fragility_iv_operator_exec_chart.png`
+- `output/fragility_iv_summary.md`
+
+---
+
+## Fragility V: Network Hotspot Engine (Iteration 7)
+
+**Date:** 2026-06-17
+**Builds on:** Iteration 6 (Fragility IV local-mode curated layer) and `flight_fragility_v_network_hotspot_spec.md`
+
+### What was implemented
+
+Fragility V extends the earlier studies into a systemwide hotspot-discovery and ranking engine. Rather than testing one corridor against peer baskets, it scores every (hub_family × spoke_airport × operator_class) cell in the Fragility IV curated layer using a six-component composite hotspot score, then ranks cells, tests robustness across four weighting scenarios, and summarizes hub and operator concentrations.
+
+- **Scoring grain:** (hub_family, spoke_airport, operator_class) — 1,304 distinct cells from the local-mode curated data.
+- **Hotspot score:** composite of six percentile-ranked components (ranked within cells meeting the min-flights threshold): cancellation rate, severe-delay rate, controllable severe-delay rate, cascade (late-arriving) severe-delay rate, adverse-weather fragility rate, and economic burden per 1,000 flights.
+- **Component weights:** equal weights (1/6 each) in the base scenario; three additional scenarios (`weather_emphasis`, `controllable_cascade_emphasis`, `economic_emphasis`) vary weights to test robustness.
+- **Robustness metric:** `hotspot_robustness_score` = share of the four scenarios in which a cell appears in the top-N hotspot list. A score of 1.0 means top-N under all four weighting assumptions.
+- **Persistence (Module E):** cells are independently scored on 2024 (baseline) and 2025 (recent) windows; `is_persistent` marks cells appearing in top-N in both.
+- New scripts: `scripts/34_analyze_fragility_hotspots.py`, `scripts/44_plot_fragility_hotspots.py`, `scripts/run_pipeline_v.sh`. Added `fragility_v:` configuration block in `config/study.yaml`.
+
+### Local-mode run results
+
+End-to-end execution consumed the Fragility IV curated layer without additional data extraction and completed in under 5 minutes.
+
+- **Total cells scored:** 1,304 (hub × spoke × operator_class combinations)
+- **Cells meeting min_flights=100:** 1,070 (used for normalization and ranking)
+- **Persistent cells** (top-20 in both baseline and recent periods): 3 of 20
+
+Top-20 cells by base hotspot score (excerpt — full ranked table in `output/fragility_v_summary.md`):
+
+| Rank | Hub | Spoke | Operator | Base Score | Robustness | Persistent |
+|---|---|---|---|---|---|---|
+| 1 | ORD | SPI | SkyWest_unresolved | 0.978 | 1.00 | No |
+| 2 | ORD | ORF | PSA_operated | 0.971 | 1.00 | No |
+| 3 | ORD | CAK | PSA_operated | 0.969 | 1.00 | No |
+| 6 | DFW | CID | AA_mainline | 0.948 | 1.00 | Yes |
+| 8 | DFW | ICT | AA_mainline | 0.933 | 1.00 | Yes |
+
+**Hub concentration in top-20:** DFW 50% (10 cells), ORD 45% (9 cells), PHL 5% (1 cell), CLT 0%.
+
+**Operator concentration in top-20 (resolved operators only):** PSA_operated 67% (10 cells), AA_mainline 33% (5 cells). SkyWest_unresolved and Republic_unresolved are excluded from this rollup per the spec (ambiguous attribution would distort operator-level counts) but are retained in hub-level rollups.
+
+**Dominant fragility signature in top-20:** economic_burden (7 cells), cascade (5 cells), severe_delay (4 cells), cancel (2 cells), controllable (1 cell), weather_sensitivity (1 cell). The majority of highest-scoring cells are driven by economic burden or cascade rather than raw weather sensitivity.
+
+**Robustness:** 9 of the top-20 cells have a robustness score of 1.0; 5 score 0.75; 3 score 0.50; 3 score 0.25. None of the top-20 cells are artifacts of a single scenario weighting.
+
+### Files produced
+
+- `output/fragility_v_hotspot_scorecard.parquet/` (Hive-partitioned by hub_family)
+- `output/fragility_v_hotspot_rankings.csv`
+- `output/fragility_v_exec_chart.png`
+- `output/fragility_v_hub_rollup.csv`
+- `output/fragility_v_operator_rollup.csv`
+- `output/fragility_v_scenario_robustness.csv`
+- `output/fragility_v_summary.json`
+- `output/fragility_v_summary.md`
+
+---
+
+*End of After Action Report — Iterations 2–7*

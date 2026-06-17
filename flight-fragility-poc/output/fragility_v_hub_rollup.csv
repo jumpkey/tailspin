@@ -1,0 +1,4 @@
+hub_family,hotspot_count,total_flights_in_top_n,share_of_top_n
+DFW,10,10119,0.5
+ORD,9,7051,0.45
+PHL,1,706,0.05

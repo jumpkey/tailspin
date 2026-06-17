@@ -67,3 +67,44 @@ hubspoke_economic_burden_baseline: "aa_system_average"
 resolve_operator_ambiguity:
   enabled: true
   max_queries: 200   # cap per run, since AeroAPI free-tier has volume limits
+
+# ---------------------------------------------------------------------------
+# Fragility V: hotspot engine config
+# ---------------------------------------------------------------------------
+fragility_v:
+  hotspot_top_n: 20
+  hotspot_min_flights: 100         # per (hub, spoke, operator_class) cell
+  # 6-component equal-weight base scenario
+  hotspot_score_weights:
+    base:
+      cancel: 0.1667
+      severe_delay: 0.1667
+      controllable: 0.1667
+      cascade: 0.1667
+      weather_sensitivity: 0.1667
+      economic_burden: 0.1667
+    weather_emphasis:
+      cancel: 0.10
+      severe_delay: 0.10
+      controllable: 0.10
+      cascade: 0.10
+      weather_sensitivity: 0.50
+      economic_burden: 0.10
+    controllable_cascade_emphasis:
+      cancel: 0.10
+      severe_delay: 0.10
+      controllable: 0.30
+      cascade: 0.30
+      weather_sensitivity: 0.10
+      economic_burden: 0.10
+    economic_emphasis:
+      cancel: 0.10
+      severe_delay: 0.10
+      controllable: 0.10
+      cascade: 0.10
+      weather_sensitivity: 0.10
+      economic_burden: 0.50
+  exclude_from_operator_rollup:
+    - SkyWest_unresolved
+    - Republic_unresolved
+    - Other_or_non_AA

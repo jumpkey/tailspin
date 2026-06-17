@@ -287,6 +287,20 @@ def run_qa(scorecard: pd.DataFrame, study: dict) -> list[str]:
     modules = sorted(scorecard["module"].unique())
     notes.append(f"Modules present: {modules}")
 
+    notes.append(
+        "Mixed denominators in combined_fragility_score: cancellation_rate uses flights_total "
+        "as its denominator; severe_delay_rate, controllable_severe_delay_rate, and "
+        "late_arriving_severe_delay_rate use operated_count (cancellations excluded). "
+        "The combined score is a weighted sum of rates with heterogeneous denominators."
+    )
+
+    notes.append(
+        "Module B economic baseline (aa_system_average) pools all resolved operator classes "
+        "within the same hub×weather×period cell — it is NOT leave-one-out. High-volume "
+        "operators with above-average fragility partially suppress their own excess signal "
+        "against this baseline."
+    )
+
     return notes
 
 
@@ -353,15 +367,19 @@ def main():
 
     qa_notes = run_qa(scorecard, study)
 
-    ranked = scorecard.sort_values("combined_fragility_score", ascending=False)
+    min_sample = study.get("min_sample_threshold", 30)
+    ranked = (
+        scorecard[scorecard["flights_total"] >= min_sample]
+        .sort_values("combined_fragility_score", ascending=False)
+    )
     top = ranked.iloc[0] if not ranked.empty else None
     annotation = None
     if top is not None:
         annotation = (
             f"Across the included AA network slices, {top['operator_class']} at "
             f"{top['hub_family']} shows the highest combined fragility score "
-            f"({top['combined_fragility_score']:.3f}) among cells with "
-            f"{top['flights_total']:,} flights."
+            f"({top['combined_fragility_score']:.3f}) among cells with at least "
+            f"{min_sample} flights ({top['flights_total']:,} flights in this cell)."
         )
 
     summary = {

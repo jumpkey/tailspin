@@ -321,7 +321,10 @@ def main():
     parser = argparse.ArgumentParser(description="Extract NOAA ASOS weather for the hub-spoke airport universe")
     parser.add_argument("--study", default="config/study.yaml")
     parser.add_argument("--run-mode", default=None, help="Override study.yaml's run_mode")
-    parser.add_argument("--airports", default="data/raw/bts_hubspoke/discovered_airports.csv")
+    parser.add_argument("--airports", default="auto",
+                        help="Path to discovered_airports CSV; 'auto' uses "
+                             "data/raw/bts_hubspoke/discovered_airports_<run_mode>.csv "
+                             "(matches 13_extract_bts_hubspoke.py's run_mode-keyed output)")
     parser.add_argument("--out", default="data/staging/weather_hubspoke_hourly.csv")
     parser.add_argument("--raw-dir", default="data/raw/faa_hubspoke")
     parser.add_argument("--force", action="store_true")
@@ -330,7 +333,6 @@ def main():
     script_dir = Path(__file__).parent
     root = script_dir.parent
     study_path = root / args.study
-    airports_path = root / args.airports
     out_path = root / args.out
     raw_dir = root / args.raw_dir
     manifest_path = raw_dir / "manifest.csv"
@@ -340,6 +342,11 @@ def main():
 
     study = load_study(study_path)
     run_mode, start, end = resolve_window(study, args.run_mode)
+
+    if args.airports == "auto":
+        airports_path = root / f"data/raw/bts_hubspoke/discovered_airports_{run_mode}.csv"
+    else:
+        airports_path = root / args.airports
 
     airports = load_discovered_airports(airports_path)
     station_map, tz_map = resolve_airport_refs(airports)
@@ -352,6 +359,8 @@ def main():
 
     session = requests.Session()
     normalized_chunks: list[pd.DataFrame] = []
+    expected_months = set(months_in_range(start, end))
+    normalized_months: set[tuple[int, int]] = set()
 
     for year, month in months_in_range(start, end):
         chunk_start, chunk_end = month_chunk_bounds(year, month, start, end)
@@ -386,9 +395,19 @@ def main():
         chunk_normalized = normalize_noaa(df_raw, station_to_airport, tz_map)
         if not chunk_normalized.empty:
             normalized_chunks.append(chunk_normalized)
+            normalized_months.add((year, month))
 
     if not normalized_chunks:
         log.error("No NOAA ASOS data after normalization.")
+        raise SystemExit(1)
+
+    missing_months = sorted(expected_months - normalized_months)
+    if missing_months:
+        missing_str = ", ".join(f"{y}-{m:02d}" for y, m in missing_months)
+        log.error(
+            f"Window-completeness check FAILED: {len(missing_months)} month(s) missing from weather output: "
+            f"{missing_str}. Re-run with --force to retry failed months, or check NOAA IEM access."
+        )
         raise SystemExit(1)
 
     staging = pd.concat(normalized_chunks, ignore_index=True)

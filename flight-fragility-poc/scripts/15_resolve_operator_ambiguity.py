@@ -168,18 +168,47 @@ def fetch_flight_history(ident: str, flight_date: str, api_key: str, session: re
 
 def resolve_brand_from_response(data: dict, carrier_code: str, flight_date: str) -> str | None:
     """Inspect the response's codeshares for an AA/UA/DL/AS-prefixed ident.
-    Returns a resolved_operator_class label, or None if unresolvable."""
+    Returns a resolved_operator_class label, or None if unresolvable.
+
+    Prefix matching requires the 2-char carrier code to be immediately followed
+    by a digit (IATA flight-number format), preventing "AS1234" from matching
+    "ASA..." or other longer codes that happen to start with the same two letters.
+
+    If codeshares contain more than one recognizable mainline prefix (multi-brand
+    conflict), the response is treated as unresolvable and None is returned.
+
+    Date filtering uses the first available timestamp field; if no date context
+    is available the flight entry is skipped rather than risked as a wrong-day
+    match.
+    """
     flights = data.get("flights", []) if isinstance(data, dict) else []
     for f in flights:
-        sched = f.get("scheduled_out") or f.get("scheduled_off") or ""
-        if sched and not sched.startswith(flight_date):
+        # Try several timestamp fields in priority order before giving up on date context
+        sched = (f.get("scheduled_out") or f.get("scheduled_off")
+                 or f.get("estimated_out") or f.get("estimated_off")
+                 or f.get("actual_out") or f.get("actual_off") or "")
+        if not sched or not sched.startswith(flight_date):
+            # Skip flight entries where we can't confirm the date — safer than
+            # risking a wrong-day codeshare match
             continue
         candidates = list(f.get("codeshares_iata") or []) + list(f.get("codeshares") or [])
+        matched_contracts: set[str] = set()
         for ident in candidates:
             ident = str(ident).strip().upper()
             for prefix, contract in CODESHARE_PREFIX_TO_CONTRACT.items():
-                if ident.startswith(prefix):
-                    return f"{carrier_code}_{contract}"
+                # Require a digit immediately after the 2-char prefix to avoid
+                # false matches on longer codes (e.g. "ASA..." matching "AS")
+                if (ident.startswith(prefix)
+                        and len(ident) > len(prefix)
+                        and ident[len(prefix)].isdigit()):
+                    matched_contracts.add(f"{carrier_code}_{contract}")
+        if len(matched_contracts) == 1:
+            return matched_contracts.pop()
+        if len(matched_contracts) > 1:
+            log.warning(
+                f"  Multi-brand conflict for {carrier_code} on {flight_date}: "
+                f"{sorted(matched_contracts)} — leaving unresolved"
+            )
     return None
 
 

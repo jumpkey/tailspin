@@ -48,7 +48,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 CELL_KEYS = ["hub_family", "spoke_airport", "operator_class"]
-EXCLUDE_FROM_SCORING = {"Other_or_non_AA"}
 COMPONENT_COLS = [
     "norm_cancel",
     "norm_severe_delay",
@@ -149,10 +148,16 @@ def aggregate_cells(df: pd.DataFrame, econ_config: dict) -> pd.DataFrame:
     return base_agg
 
 
-def normalize_components(agg: pd.DataFrame, min_flights: int) -> pd.DataFrame:
-    """Compute percentile-rank normalization of the 6 raw metrics within
-    the pool of cells meeting min_flights. Returns agg with norm_ columns
-    added; cells below min_flights receive NaN norms."""
+def normalize_components(agg: pd.DataFrame, min_flights: int,
+                         min_adv_flights: int = 0) -> pd.DataFrame:
+    """Compute percentile-rank normalization of the 6 raw metrics.
+
+    Cells below min_flights receive NaN for all 6 norm_ columns (excluded
+    from ranking entirely). For norm_weather_sensitivity specifically, cells
+    with fewer than min_adv_flights adverse-weather flights also receive NaN,
+    so sparse adverse samples don't dominate that component. Such cells are
+    still scored on the remaining 5 components by compute_hotspot_score().
+    """
     agg = agg.copy()
     included_mask = agg["flights_total"] >= min_flights
 
@@ -166,35 +171,54 @@ def normalize_components(agg: pd.DataFrame, min_flights: int) -> pd.DataFrame:
     }
 
     for raw_col, norm_col in raw_to_norm.items():
-        pool = agg.loc[included_mask, raw_col]
+        if raw_col == "adverse_weather_fragility_rate" and min_adv_flights > 0:
+            cell_mask = included_mask & (agg["adv_flights"] >= min_adv_flights)
+        else:
+            cell_mask = included_mask
+        pool = agg.loc[cell_mask, raw_col]
         ranks = pool.rank(pct=True, method="average")
         agg[norm_col] = np.nan
-        agg.loc[included_mask, norm_col] = ranks.values
+        agg.loc[cell_mask, norm_col] = ranks.values
 
     n_included = included_mask.sum()
+    n_adv_sparse = (included_mask & (agg["adv_flights"] < min_adv_flights)).sum() if min_adv_flights > 0 else 0
     n_total = len(agg)
     log.info(
         f"Normalization pool: {n_included:,} cells meet min_flights={min_flights} "
         f"(of {n_total:,} total cells)"
     )
+    if min_adv_flights > 0:
+        log.info(
+            f"  norm_weather_sensitivity: {n_included - n_adv_sparse:,} cells meet "
+            f"min_adv_flights={min_adv_flights}; {n_adv_sparse:,} cells score on 5 components only"
+        )
+    agg["meets_min_adv_flights"] = (agg["adv_flights"] >= min_adv_flights) if min_adv_flights > 0 else True
     return agg
 
 
-def compute_hotspot_score(agg: pd.DataFrame, weights: dict, scenario_name: str) -> pd.Series:
-    score = pd.Series(np.nan, index=agg.index)
-    has_norms = agg[COMPONENT_COLS].notna().all(axis=1)
-    score[has_norms] = sum(
-        weights[NORM_TO_WEIGHT[col]] * agg.loc[has_norms, col]
-        for col in COMPONENT_COLS
-    )
-    return score
+def compute_hotspot_score(agg: pd.DataFrame, weights: dict) -> pd.Series:
+    """Score each cell as a weighted average of available normalized components.
+
+    When all 6 norm_ columns are present (the common case) this is a standard
+    fixed weighted sum. When norm_weather_sensitivity is NaN (adverse-flight
+    sparse cells), the score is computed on the remaining 5 components with
+    their weights renormalized to sum to 1.0. Cells with no available
+    components score NaN.
+    """
+    w_arr = np.array([weights[NORM_TO_WEIGHT[col]] for col in COMPONENT_COLS], dtype=float)
+    vals = agg[COMPONENT_COLS].to_numpy(dtype=float)
+    available = ~np.isnan(vals)
+    w_sum = np.where(available, w_arr, 0.0).sum(axis=1)
+    weighted = np.where(available, w_arr * vals, 0.0).sum(axis=1)
+    score = np.where(w_sum > 0, weighted / w_sum, np.nan)
+    return pd.Series(score, index=agg.index)
 
 
 def compute_all_scenarios(agg: pd.DataFrame, scenario_weights: dict) -> pd.DataFrame:
     agg = agg.copy()
     for scenario_name, weights in scenario_weights.items():
         col = f"hotspot_score_{scenario_name}"
-        agg[col] = compute_hotspot_score(agg, weights, scenario_name)
+        agg[col] = compute_hotspot_score(agg, weights)
         log.info(
             f"Scenario '{scenario_name}': scored {agg[col].notna().sum():,} cells "
             f"(min={agg[col].min():.4f}, max={agg[col].max():.4f})"
@@ -203,19 +227,30 @@ def compute_all_scenarios(agg: pd.DataFrame, scenario_weights: dict) -> pd.DataF
 
 
 def compute_robustness(agg: pd.DataFrame, scenario_names: list[str], top_n: int) -> pd.Series:
-    """Fraction of scenarios where the cell ranks in the top_n."""
-    included_mask = agg[COMPONENT_COLS].notna().all(axis=1)
+    """Fraction of scenarios in which the cell ranks in the top_n.
+
+    Included pool: cells with a non-NaN base-scenario score (cells scoring
+    on 5 components due to adverse-flight sparsity are included, since
+    compute_hotspot_score returns a finite score for them).
+    """
+    score_cols = [f"hotspot_score_{s}" for s in scenario_names if f"hotspot_score_{s}" in agg.columns]
+    if not score_cols:
+        return pd.Series(np.nan, index=agg.index)
+
+    included_mask = agg[score_cols[0]].notna()
     robustness = pd.Series(np.nan, index=agg.index)
     if included_mask.sum() == 0:
         return robustness
 
     in_top_count = pd.Series(0.0, index=agg.index)
     n_scenarios = len(scenario_names)
-    for scenario_name in scenario_names:
-        col = f"hotspot_score_{scenario_name}"
+    for sname in scenario_names:
+        col = f"hotspot_score_{sname}"
+        if col not in agg.columns:
+            continue
         # rank descending among included cells; dense to avoid ties shifting boundary
         ranked = agg.loc[included_mask, col].rank(ascending=False, method="min")
-        in_top = (ranked <= top_n).astype(float)
+        in_top = (ranked <= top_n).fillna(False).astype(float)
         in_top_count.loc[included_mask] += in_top.values
 
     robustness.loc[included_mask] = in_top_count.loc[included_mask] / n_scenarios
@@ -246,18 +281,24 @@ def compute_period_subscores(
     scenario_weights: dict,
     top_n: int,
     min_flights: int,
+    min_adv_flights: int,
     period: str,
 ) -> set:
     """Return the set of (hub_family, spoke_airport, operator_class) tuples
-    that rank in the top_n for the given period using base scenario."""
+    that rank in the top_n for the given period using the base scenario.
+
+    The per-period flight threshold is min_flights // 2 (half of the full-study
+    threshold) so that cells with enough data over the full study window remain
+    eligible even when split into two sub-periods of roughly equal duration.
+    """
     sub = df[df["period_flag"] == period]
     if sub.empty:
         return set()
 
     sub_agg = aggregate_cells(sub, econ_config)
-    sub_agg = normalize_components(sub_agg, min_flights // 2)
+    sub_agg = normalize_components(sub_agg, min_flights // 2, min_adv_flights)
     weights = scenario_weights.get("base", list(scenario_weights.values())[0])
-    sub_agg["_sub_score"] = compute_hotspot_score(sub_agg, weights, "base")
+    sub_agg["_sub_score"] = compute_hotspot_score(sub_agg, weights)
 
     included = sub_agg[sub_agg["_sub_score"].notna()].copy()
     if included.empty:
@@ -269,10 +310,16 @@ def compute_period_subscores(
 
 
 def compute_persistence(df: pd.DataFrame, agg: pd.DataFrame, econ_config: dict,
-                        scenario_weights: dict, top_n: int, min_flights: int) -> pd.Series:
-    log.info("Computing persistence (Module E): baseline vs. recent period sub-scores...")
-    baseline_top = compute_period_subscores(df, econ_config, scenario_weights, top_n, min_flights, "baseline")
-    recent_top = compute_period_subscores(df, econ_config, scenario_weights, top_n, min_flights, "recent")
+                        scenario_weights: dict, top_n: int, min_flights: int,
+                        min_adv_flights: int) -> pd.Series:
+    log.info(
+        f"Computing persistence (Module E): baseline vs. recent period sub-scores "
+        f"(per-period min_flights={min_flights // 2} = {min_flights} // 2)..."
+    )
+    baseline_top = compute_period_subscores(df, econ_config, scenario_weights, top_n,
+                                            min_flights, min_adv_flights, "baseline")
+    recent_top = compute_period_subscores(df, econ_config, scenario_weights, top_n,
+                                          min_flights, min_adv_flights, "recent")
     persistent = baseline_top & recent_top
     log.info(
         f"  Baseline top-{top_n}: {len(baseline_top)} cells, "
@@ -415,18 +462,38 @@ def write_markdown_summary(agg: pd.DataFrame, top: pd.DataFrame, op_rollup: pd.D
     lines.append("## 6. Caveats")
     lines.append("")
     lines.append(
-        "- The hotspot score is a composite index based on six normalized components. "
-        "Equal weights in the base scenario treat all components as equally important; "
-        "alternative weighting scenarios test robustness.\n"
-        "- Cells with fewer than the minimum-flights threshold are excluded from "
-        "normalization and ranking but are retained in the output Parquet for completeness.\n"
-        "- SkyWest_unresolved and Republic_unresolved are included in hotspot scoring but "
-        "excluded from the operator-concentration rollup (Module B), where ambiguous "
-        "attribution would distort the operator-level count.\n"
-        "- Other_or_non_AA rows (non-AA carriers sharing BTS reporting at these airports) "
-        "are excluded entirely from hotspot computation.\n"
-        "- Economic burden is an absolute-cost proxy (not excess vs. a peer baseline) "
-        "using published DOT block-cost benchmarks. It is not sourced from airline financials."
+        "- **Composite index**: The hotspot score aggregates six normalized percentile-rank "
+        "components. Equal weights in the base scenario treat all components as equally important; "
+        "four robustness scenarios span the space of alternative emphases.\n"
+        "- **Minimum-flight threshold**: Cells below the min-flights threshold are excluded from "
+        "normalization and ranking; they are retained in the Parquet output for completeness.\n"
+        "- **Adverse-weather sample sparsity**: `norm_weather_sensitivity` is computed only from "
+        "cells meeting the minimum adverse-flight threshold (`hotspot_min_adv_flights` in "
+        "study.yaml). Cells below this threshold have `norm_weather_sensitivity = NaN` and are "
+        "scored on the remaining five components only (weights renormalized). Without this gate, "
+        "a cell with a handful of adverse flights and a perfect fragility rate on those flights "
+        "would rank first — a classic small-sample upward bias.\n"
+        "- **Severe-delay definition inconsistency**: `severe_delay_flag` (used in "
+        "`norm_severe_delay`) tests arrival delay ≥ threshold only. "
+        "`controllable_severe_delay_flag` and `late_arriving_severe_delay_flag` (used in "
+        "`norm_controllable` and `norm_cascade`) test departure OR arrival delay ≥ threshold. "
+        "These components are not directly comparable; treat the composite score accordingly.\n"
+        "- **Persistence check and winner's curse**: The persistence flag marks cells that rank "
+        "in the top-N in both the baseline and recent sub-periods independently. Only a small "
+        "fraction of top-N cells are expected to be persistent: a top-N list of 20 drawn from "
+        "1,000+ cells will contain many cells whose rank is partly due to random variation "
+        "(winner's curse). High robustness score (fraction of scenarios where the cell is top-N) "
+        "is a stronger signal than base-scenario rank alone. Cells with high robustness AND "
+        "persistence are the most defensible prioritization targets.\n"
+        "- **Persistence threshold**: Each sub-period uses `min_flights // 2` as its minimum-"
+        "flight threshold (half the full-study threshold) so cells with adequate full-study "
+        "coverage remain eligible after the period split.\n"
+        "- **SkyWest/Republic operator ambiguity**: SkyWest_unresolved and Republic_unresolved "
+        "are included in hotspot scoring but excluded from the operator-concentration rollup "
+        "(Module B). Their cell-level scores are valid but the operator label is ambiguous.\n"
+        "- **Economic burden**: Absolute-cost proxy using published DOT block-cost benchmarks, "
+        "not excess vs. a peer baseline. It is not sourced from airline financials.\n"
+        "- **Non-AA carriers**: Other_or_non_AA rows are excluded entirely from hotspot scoring."
     )
     lines.append("")
 
@@ -459,6 +526,7 @@ def main():
     fv_config = study.get("fragility_v", {})
     top_n = args.top_n or fv_config.get("hotspot_top_n", 20)
     min_flights = fv_config.get("hotspot_min_flights", 100)
+    min_adv_flights = fv_config.get("hotspot_min_adv_flights", 0)
     scenario_weights = fv_config.get("hotspot_score_weights", {})
     exclude_from_rollup = fv_config.get("exclude_from_operator_rollup", [])
 
@@ -489,7 +557,7 @@ def main():
     df = derive_spoke(df, hubs if hubs else list(df["hub_family"].unique()))
 
     agg = aggregate_cells(df, econ_config)
-    agg = normalize_components(agg, min_flights)
+    agg = normalize_components(agg, min_flights, min_adv_flights)
     agg = compute_all_scenarios(agg, scenario_weights)
 
     scenario_names = list(scenario_weights.keys())
@@ -498,7 +566,8 @@ def main():
     agg["meets_min_flights"] = agg["flights_total"] >= min_flights
 
     # Module E: persistence
-    agg["is_persistent"] = compute_persistence(df, agg, econ_config, scenario_weights, top_n, min_flights)
+    agg["is_persistent"] = compute_persistence(df, agg, econ_config, scenario_weights, top_n,
+                                               min_flights, min_adv_flights)
 
     # --- Output: full scorecard partitioned by hub_family ---
     scorecard_dir = out_dir / "fragility_v_hotspot_scorecard.parquet"

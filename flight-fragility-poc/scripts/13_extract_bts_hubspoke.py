@@ -19,7 +19,7 @@ Outputs
 data/raw/bts_hubspoke/bts_hubspoke_YYYY_MM.csv   Monthly raw extracts (cached)
 data/staging/bts_hubspoke/                       Hive-partitioned Parquet, partitioned by year_month
 data/raw/bts_hubspoke/manifest.csv               Audit log
-data/raw/bts_hubspoke/discovered_airports.csv    Spoke-airport universe discovered this run
+data/raw/bts_hubspoke/discovered_airports_<run_mode>.csv  Spoke-airport universe (run_mode-keyed)
 
 Usage
 -----
@@ -212,6 +212,8 @@ def main():
     log.info(f"run_mode={run_mode}  hubs={hubs}  window={start}..{end}")
 
     all_frames: list[pd.DataFrame] = []
+    expected_months = set(months_in_range(start, end))
+    fetched_months: set[tuple[int, int]] = set()
     session = requests.Session()
 
     for year, month in months_in_range(start, end):
@@ -248,9 +250,19 @@ def main():
             lambda r: r["origin"] if r["origin"] in hubs else r["dest"], axis=1
         )
         all_frames.append(normalized)
+        fetched_months.add((year, month))
 
     if not all_frames:
         log.error("No BTS hub-spoke data extracted. Check network access and retry.")
+        sys.exit(1)
+
+    missing_months = sorted(expected_months - fetched_months)
+    if missing_months:
+        missing_str = ", ".join(f"{y}-{m:02d}" for y, m in missing_months)
+        log.error(
+            f"Window-completeness check FAILED: {len(missing_months)} month(s) missing from BTS output: "
+            f"{missing_str}. Re-run with --force to retry failed months, or check network access."
+        )
         sys.exit(1)
 
     staging = pd.concat(all_frames, ignore_index=True)
@@ -263,7 +275,10 @@ def main():
     write_partitioned_parquet(staging, out_dir, partition_cols=["year_month"])
 
     discovered_airports = sorted(set(staging["origin"]) | set(staging["dest"]))
-    discovered_path = raw_dir / "discovered_airports.csv"
+    # Keyed by run_mode so a test-mode run (DFW-only) does not clobber a
+    # local-mode discovered-airport list — 14_extract_weather_hubspoke.py
+    # reads the same run_mode-keyed path automatically.
+    discovered_path = raw_dir / f"discovered_airports_{run_mode}.csv"
     pd.DataFrame({"airport": discovered_airports}).to_csv(discovered_path, index=False)
     log.info(f"Discovered {len(discovered_airports)} airports (hubs + spokes) "
              f"-> {discovered_path}")

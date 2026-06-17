@@ -74,6 +74,8 @@ resolve_operator_ambiguity:
 fragility_v:
   hotspot_top_n: 20
   hotspot_min_flights: 100         # per (hub, spoke, operator_class) cell
+  hotspot_min_adv_flights: 30      # minimum adverse-weather flights for norm_weather_sensitivity;
+                                   # cells below this threshold score on the remaining 5 components
   # 6-component equal-weight base scenario
   hotspot_score_weights:
     base:

@@ -31,9 +31,7 @@ python scripts/21_build_hubspoke_fact.py --study config/study.yaml
 import argparse
 import logging
 import sys
-from datetime import datetime, date, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import airportsdata
 import numpy as np
@@ -52,8 +50,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 _AIRPORTS_DB = airportsdata.load("IATA")
-_TZ_CACHE: dict[str, ZoneInfo] = {}
-UTC = ZoneInfo("UTC")
 
 
 def _airport_tz_name(airport: str) -> str:
@@ -61,40 +57,8 @@ def _airport_tz_name(airport: str) -> str:
     return rec["tz"] if rec and rec.get("tz") else "America/Chicago"
 
 
-def _get_tz(tz_name: str) -> ZoneInfo:
-    if tz_name not in _TZ_CACHE:
-        try:
-            _TZ_CACHE[tz_name] = ZoneInfo(tz_name)
-        except ZoneInfoNotFoundError:
-            _TZ_CACHE[tz_name] = ZoneInfo("America/Chicago")
-    return _TZ_CACHE[tz_name]
-
-
 BUCKET_RANK = {"adverse": 2, "marginal": 1, "benign": 0, "unknown": -1}
 RANK_BUCKET = {v: k for k, v in BUCKET_RANK.items()}
-
-
-def _worst_bucket(b1: str, b2: str) -> str:
-    r1 = BUCKET_RANK.get(b1, -1)
-    r2 = BUCKET_RANK.get(b2, -1)
-    return RANK_BUCKET.get(max(r1, r2), "benign")
-
-
-def _hhmm_to_utc(flight_date: date, hhmm_str: str, airport: str) -> tuple[date, int]:
-    try:
-        hhmm = str(hhmm_str).strip().zfill(4)
-        h = int(hhmm[:2])
-        m = int(hhmm[2:4])
-        if h == 24:
-            h = 0
-            flight_date = flight_date + timedelta(days=1)
-        h = min(h, 23)
-        tz = _get_tz(_airport_tz_name(airport))
-        local_dt = datetime(flight_date.year, flight_date.month, flight_date.day, h, m, tzinfo=tz)
-        utc_dt = local_dt.astimezone(UTC)
-        return utc_dt.date(), utc_dt.hour
-    except Exception:
-        return flight_date, int(str(hhmm_str).strip().zfill(4)[:2]) if hhmm_str else 0
 
 
 def load_study(path: Path) -> dict:
@@ -115,49 +79,86 @@ def load_weather(path: Path) -> pd.DataFrame:
 
 
 def _add_utc_keys(bts: pd.DataFrame) -> pd.DataFrame:
-    log.info("  Converting BTS local times to UTC ...")
-    dep_dates, dep_hours, arr_dates, arr_hours = [], [], [], []
-
-    for _, row in bts.iterrows():
-        fd = row["flight_date"].date() if pd.notna(row["flight_date"]) else date.today()
-        origin = str(row.get("origin", "")).strip().upper()
-        dest = str(row.get("dest", "")).strip().upper()
-
-        d_date, d_hour = _hhmm_to_utc(fd, row.get("sched_dep_local", "0000"), origin)
-        dep_dates.append(str(d_date))
-        dep_hours.append(d_hour)
-
-        elapsed = row.get("scheduled_elapsed_min")
-        try:
-            elapsed = float(elapsed)
-        except (TypeError, ValueError):
-            elapsed = None
-
-        if elapsed is not None and elapsed > 0:
-            dep_tz = _get_tz(_airport_tz_name(origin))
-            hhmm = str(row.get("sched_dep_local", "0000")).strip().zfill(4)
-            h = min(int(hhmm[:2]), 23)
-            m = int(hhmm[2:4]) if hhmm[2:4].isdigit() else 0
-            try:
-                local_dep = datetime(fd.year, fd.month, fd.day, h, m, tzinfo=dep_tz)
-                utc_arr = local_dep.astimezone(UTC) + timedelta(minutes=elapsed)
-                arr_dates.append(str(utc_arr.date()))
-                arr_hours.append(utc_arr.hour)
-            except Exception:
-                arr_dates.append(str(d_date))
-                arr_hours.append((d_hour + 2) % 24)
-        else:
-            a_date, a_hour = _hhmm_to_utc(fd, row.get("sched_arr_local", "0000"), dest)
-            if (a_date, a_hour) < (d_date, d_hour):
-                a_date = (datetime.combine(a_date, datetime.min.time()) + timedelta(days=1)).date()
-            arr_dates.append(str(a_date))
-            arr_hours.append(a_hour)
-
+    """Convert BTS scheduled local times to UTC date + hour, vectorized by
+    timezone group. Iterates over unique timezone names (O(~50) groups for
+    the full US network) rather than over rows, matching the approach used
+    in normalize_noaa() in 14_extract_weather_hubspoke.py."""
+    log.info("  Converting BTS local times to UTC (vectorized by timezone group)...")
     bts = bts.copy()
-    bts["dep_utc_date"] = dep_dates
-    bts["dep_utc_hour"] = dep_hours
-    bts["arr_utc_date"] = arr_dates
-    bts["arr_utc_hour"] = arr_hours
+
+    # --- Parse HHMM strings to integer hours + minutes ---
+    dep_hhmm = bts["sched_dep_local"].fillna("0000").astype(str).str.strip().str.zfill(4)
+    arr_hhmm = bts["sched_arr_local"].fillna("0000").astype(str).str.strip().str.zfill(4)
+
+    dep_h_raw = pd.to_numeric(dep_hhmm.str[:2], errors="coerce").fillna(0).astype(int)
+    dep_m = pd.to_numeric(dep_hhmm.str[2:4], errors="coerce").fillna(0).astype(int)
+    arr_h_raw = pd.to_numeric(arr_hhmm.str[:2], errors="coerce").fillna(0).astype(int)
+    arr_m = pd.to_numeric(arr_hhmm.str[2:4], errors="coerce").fillna(0).astype(int)
+
+    # h==24 means next-calendar-day at 00:00 (BTS convention)
+    dep_next_day = (dep_h_raw == 24).astype(int)
+    dep_h = dep_h_raw.clip(upper=23)
+    arr_next_day = (arr_h_raw == 24).astype(int)
+    arr_h = arr_h_raw.clip(upper=23)
+
+    # --- Build naive local timestamps (tz applied per group below) ---
+    fd = bts["flight_date"].dt.normalize()  # midnight, tz-naive
+    dep_local = (fd
+                 + pd.to_timedelta(dep_next_day, unit="D")
+                 + pd.to_timedelta(dep_h * 60 + dep_m, unit="min"))
+    arr_local = (fd
+                 + pd.to_timedelta(arr_next_day, unit="D")
+                 + pd.to_timedelta(arr_h * 60 + arr_m, unit="min"))
+
+    # --- Map airports to timezone names ---
+    bts["_dep_tz"] = (bts["origin"].fillna("").astype(str)
+                      .str.strip().str.upper().map(_airport_tz_name))
+    bts["_arr_tz"] = (bts["dest"].fillna("").astype(str)
+                      .str.strip().str.upper().map(_airport_tz_name))
+
+    # --- Convert departure local → UTC, iterating over timezone groups ---
+    dep_utc = pd.Series(pd.NaT, index=bts.index, dtype="datetime64[ns]")
+    for tz_name, idxs in bts.groupby("_dep_tz", sort=False).groups.items():
+        localized = dep_local.loc[idxs].dt.tz_localize(
+            str(tz_name), ambiguous="NaT", nonexistent="shift_forward"
+        )
+        dep_utc.loc[idxs] = localized.dt.tz_convert("UTC").dt.tz_localize(None)
+
+    bts["dep_utc_date"] = dep_utc.dt.date.astype(str)
+    bts["dep_utc_hour"] = dep_utc.dt.hour.fillna(0).astype(int)
+
+    # --- Arrival UTC: prefer scheduled_elapsed_min, fall back to sched_arr_local ---
+    elapsed = pd.to_numeric(bts.get("scheduled_elapsed_min", pd.Series(dtype=float,
+                                                                        index=bts.index)),
+                             errors="coerce")
+    has_elapsed = elapsed.notna() & (elapsed > 0)
+
+    arr_utc = pd.Series(pd.NaT, index=bts.index, dtype="datetime64[ns]")
+
+    if has_elapsed.any():
+        arr_utc.loc[has_elapsed] = (dep_utc.loc[has_elapsed]
+                                    + pd.to_timedelta(elapsed.loc[has_elapsed], unit="min"))
+
+    needs_arr_local = ~has_elapsed
+    if needs_arr_local.any():
+        arr_utc2 = pd.Series(pd.NaT, index=bts.index, dtype="datetime64[ns]")
+        sub_bts = bts.loc[needs_arr_local]
+        for tz_name, idxs in sub_bts.groupby("_arr_tz", sort=False).groups.items():
+            localized = arr_local.loc[idxs].dt.tz_localize(
+                str(tz_name), ambiguous="NaT", nonexistent="shift_forward"
+            )
+            arr_utc2.loc[idxs] = localized.dt.tz_convert("UTC").dt.tz_localize(None)
+
+        # Overnight guard: if arr_utc < dep_utc bump arrival by 1 day
+        overnight = (needs_arr_local & arr_utc2.notna() & dep_utc.notna()
+                     & (arr_utc2 < dep_utc))
+        arr_utc2.loc[overnight] += pd.Timedelta(days=1)
+        arr_utc.loc[needs_arr_local] = arr_utc2.loc[needs_arr_local]
+
+    bts["arr_utc_date"] = arr_utc.dt.date.astype(str)
+    bts["arr_utc_hour"] = arr_utc.dt.hour.fillna(0).astype(int)
+
+    bts = bts.drop(columns=["_dep_tz", "_arr_tz"])
     return bts
 
 
@@ -188,10 +189,20 @@ def join_weather(bts: pd.DataFrame, wx: pd.DataFrame) -> pd.DataFrame:
         right_on=["airport_code", "obs_date_utc", "obs_hour_utc"], how="left",
     ).drop(columns=["airport_code", "obs_date_utc", "obs_hour_utc"], errors="ignore")
 
-    merged["weather_bucket"] = merged.apply(
-        lambda r: _worst_bucket(r.get("wx_dep_bucket") or "benign", r.get("wx_arr_bucket") or "benign"),
-        axis=1,
-    )
+    # Vectorized worst-bucket: map bucket strings to ranks (NaN → -1 = "unknown"),
+    # take the element-wise max, then map back to the bucket string.
+    # wx_dep/arr_bucket is NaN where no weather record matched the flight's UTC hour.
+    # NaN is truthy in Python so the former `or "benign"` idiom did NOT coerce NaN
+    # to "benign" — NaN passed through to BUCKET_RANK.get() as -1 ("unknown").
+    # The explicit rank-based approach below makes this behavior unambiguous:
+    #   both endpoints unmatched   → max(-1,-1) = -1 → "unknown"
+    #   one endpoint unmatched     → max(-1, matched_rank) = matched_rank
+    #     (single-endpoint miss inherits the matched endpoint's bucket; this
+    #      is a known downward bias — an unmatched endpoint can't contribute
+    #      an adverse/marginal signal it may actually have had)
+    dep_rank = merged["wx_dep_bucket"].map(BUCKET_RANK).fillna(-1).astype(int)
+    arr_rank = merged["wx_arr_bucket"].map(BUCKET_RANK).fillna(-1).astype(int)
+    merged["weather_bucket"] = np.maximum(dep_rank, arr_rank).map(RANK_BUCKET)
 
     total = len(merged)
     dep_matched = merged["wx_dep_bucket"].notna().sum()

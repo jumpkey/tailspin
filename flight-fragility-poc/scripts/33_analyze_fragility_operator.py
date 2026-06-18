@@ -141,11 +141,14 @@ def aggregate_grain(fact: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
 
+    # All four rates use flights_total (unconditional denominator) so the weighted
+    # combined_fragility_score compares outcomes over the same sample space and
+    # does not reward aggressive cancellation with artificially lower delay rates.
     agg["cancellation_rate"] = agg["cancelled_count"] / agg["flights_total"].clip(lower=1)
-    agg["severe_delay_rate"] = agg["severe_delay_count"] / agg["operated_count"].clip(lower=1)
+    agg["severe_delay_rate"] = agg["severe_delay_count"] / agg["flights_total"].clip(lower=1)
     agg["controllable_cancel_rate"] = agg["controllable_cancel_count"] / agg["flights_total"].clip(lower=1)
-    agg["controllable_severe_delay_rate"] = agg["controllable_severe_delay_count"] / agg["operated_count"].clip(lower=1)
-    agg["late_arriving_severe_delay_rate"] = agg["late_arriving_severe_delay_count"] / agg["operated_count"].clip(lower=1)
+    agg["controllable_severe_delay_rate"] = agg["controllable_severe_delay_count"] / agg["flights_total"].clip(lower=1)
+    agg["late_arriving_severe_delay_rate"] = agg["late_arriving_severe_delay_count"] / agg["flights_total"].clip(lower=1)
     agg["weather_fragility_rate"] = (
         (agg["cancelled_count"] + agg["severe_delay_count"]) / agg["flights_total"].clip(lower=1)
     )
@@ -288,10 +291,9 @@ def run_qa(scorecard: pd.DataFrame, study: dict) -> list[str]:
     notes.append(f"Modules present: {modules}")
 
     notes.append(
-        "Mixed denominators in combined_fragility_score: cancellation_rate uses flights_total "
-        "as its denominator; severe_delay_rate, controllable_severe_delay_rate, and "
-        "late_arriving_severe_delay_rate use operated_count (cancellations excluded). "
-        "The combined score is a weighted sum of rates with heterogeneous denominators."
+        "All four combined_fragility_score components use flights_total as their denominator "
+        "(unconditional probability over the full scheduled sample). This ensures the weighted "
+        "sum compares outcomes over the same sample space for every component."
     )
 
     notes.append(

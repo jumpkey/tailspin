@@ -99,13 +99,16 @@ def aggregate_cells(df: pd.DataFrame, econ_config: dict) -> pd.DataFrame:
         .reset_index()
     )
 
+    # All rates use flights_total (unconditional denominator), consistent with
+    # aggregate_grain() in script 33 — same sample space, no selection-bias from
+    # carriers that offload poor-performing flights to cancellations.
     base_agg["cancellation_rate"] = base_agg["cancelled_count"] / base_agg["flights_total"].clip(lower=1)
     base_agg["severe_delay_rate"] = base_agg["severe_delay_count"] / base_agg["flights_total"].clip(lower=1)
     base_agg["controllable_severe_delay_rate"] = (
-        base_agg["controllable_severe_delay_count"] / base_agg["operated_count"].clip(lower=1)
+        base_agg["controllable_severe_delay_count"] / base_agg["flights_total"].clip(lower=1)
     )
     base_agg["late_arriving_severe_delay_rate"] = (
-        base_agg["late_arriving_severe_delay_count"] / base_agg["operated_count"].clip(lower=1)
+        base_agg["late_arriving_severe_delay_count"] / base_agg["flights_total"].clip(lower=1)
     )
 
     # Adverse-weather fragility: computed from adverse-wx rows only

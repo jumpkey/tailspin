@@ -422,18 +422,14 @@ def derive_fragility_ii_flags(df: pd.DataFrame, study: dict) -> pd.DataFrame:
         (df.get("cancellation_code_bts", pd.Series("")) == "A")
     ).astype(int)
 
-    # Severe-delay definition for Fragility II is an OR of dep/arr delay,
-    # which differs from Fragility I's arrival-only severe_delay_flag — see
-    # spec section "Definitional consistency with Fragility I."
-    severe_either = (
-        (df.get("dep_delay_min", pd.Series(np.nan)) >= delay_thresh) |
-        (df.get("arr_delay_min", pd.Series(np.nan)) >= delay_thresh)
-    )
+    # Arrival-only severe threshold, consistent with severe_delay_flag (Fragility I).
+    # Guarantees controllable_severe_delay_count ≤ severe_delay_count at every cell.
+    severe_arr = (df.get("arr_delay_min", pd.Series(np.nan)) >= delay_thresh)
     df["controllable_severe_delay_flag"] = (
-        (df["controllable_delay_flag"] == 1) & severe_either
+        (df["controllable_delay_flag"] == 1) & severe_arr
     ).astype(int)
     df["late_arriving_severe_delay_flag"] = (
-        (df["late_arriving_flag"] == 1) & severe_either
+        (df["late_arriving_flag"] == 1) & severe_arr
     ).astype(int)
 
     return df

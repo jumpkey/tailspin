@@ -968,3 +968,234 @@ Top-20 cells by base hotspot score (excerpt — full ranked table in `output/fra
 ---
 
 *End of After Action Report — Iterations 2–7*
+
+---
+
+## Iteration 8: Pre-Bigrun Hardening — Code Review Fixes (2026-06-18)
+
+**Date:** 2026-06-18
+**Builds on:** Iteration 7 (Fragility V implementation)
+
+### What this iteration is
+
+A complete end-to-end code and methodology review of every Fragility IV/V
+component was conducted before the bigrun (full configured hub network,
+Jan 2024–Dec 2025). The review adopted an outside-in critical perspective
+covering: correctness, defensibility of headline findings, bigrun
+reliability, and disclosure of known limitations. Sixteen specific findings
+were identified and all sixteen were implemented in a single commit
+(`3acf9b5`).
+
+### Findings and fixes
+
+#### Tier 1 — Defensibility of headline findings
+
+**Finding 1: Adverse-weather sample sparsity (Fragility V)**
+
+`norm_weather_sensitivity` was computed purely from `adverse_weather_fragility_rate`
+with no minimum adverse-flight count. The top-ranked cell in the
+local-mode run (ORD-SPI, SkyWest_unresolved, rank 1) had 8 adverse-weather
+flights with an 87.5% adverse-fragility rate, yielding a normalized score of
+0.992 — a classic small-sample upward bias. 9 of the top-20 local-mode cells
+had fewer than 30 adverse flights.
+
+*Fix:* Added `hotspot_min_adv_flights: 30` to `config/study.yaml`'s `fragility_v`
+block. In `normalize_components()`, cells below this threshold receive
+`norm_weather_sensitivity = NaN` and are scored on the remaining 5 components
+only, with weights renormalized to sum to 1.0 (no hard exclusion from scoring).
+`compute_hotspot_score()` was rewritten as a vectorized weighted-available-
+components average, handling NaN components gracefully. A `meets_min_adv_flights`
+flag is added to the output.
+
+**Finding 2: Winner's curse / persistence framing (Fragility V)**
+
+The `hotspot_robustness_score` metric was computed using a mask that required
+all 6 components to be non-NaN — incompatible with the new partial-scoring
+approach. The persistence check also used `min_flights // 2` as its per-period
+threshold without disclosing this halving anywhere in logs or output.
+
+*Fix:* `compute_robustness()` updated to use the base-scenario score's notna
+mask (cells scoring on 5 components are correctly included). `compute_persistence()`
+now logs `"per-period min_flights={min_flights // 2} = {min_flights} // 2"`. The
+caveats section in `write_markdown_summary()` now foregrounds winner's curse, the
+low expected persistence rate for a top-20 list drawn from 1,000+ cells, and the
+interpretation of robustness vs. rank as separate signals.
+
+**Finding 3: Min-sample gating for top-cell selection (Fragility IV)**
+
+In `33_analyze_fragility_operator.py`, the top-cell annotation and JSON summary
+were selected from the full scorecard with no minimum sample requirement —
+a 1-flight cell could win. 
+
+*Fix:* Top-cell selection now filters to `flights_total >= min_sample_threshold`
+(study.yaml default: 30) before sorting. Annotation text updated to state the
+minimum-sample gate.
+
+#### Tier 2 — Disclosures
+
+**Finding 4: Mixed denominators in combined_fragility_score (Fragility IV)**
+
+`cancellation_rate` uses `flights_total` as its denominator; `severe_delay_rate`,
+`controllable_severe_delay_rate`, and `late_arriving_severe_delay_rate` use
+`operated_count`. The combined score is a weighted sum of rates with
+heterogeneous denominators.
+
+*Fix:* Added an explicit caveat to `run_qa()` output in
+`33_analyze_fragility_operator.py`.
+
+**Finding 5: Self-inclusive Module B baseline (Fragility IV)**
+
+The `aa_system_average` baseline used in Module B pools all resolved operator
+classes within the same `hub × weather × period` cell, including the operator
+being scored. It is not leave-one-out. High-volume operators with above-average
+fragility partially suppress their own excess signal.
+
+*Fix:* Added an explicit caveat to `run_qa()` output, supplementing the
+existing docstring note.
+
+**Finding 6: Severe-delay definition inconsistency (Fragility V)**
+
+`severe_delay_flag` (basis for `norm_severe_delay`) tests arrival delay
+≥ threshold only. `controllable_severe_delay_flag` and
+`late_arriving_severe_delay_flag` (basis for `norm_controllable` and
+`norm_cascade`) test departure OR arrival delay ≥ threshold. These components
+are therefore not directly comparable within the composite score.
+
+*Fix:* Added an explicit caveat to the caveats section of `fragility_v_summary.md`
+in `write_markdown_summary()`.
+
+#### Tier 3 — Bigrun protection
+
+**Finding 7: Silent partial-window failures (scripts 13 and 14)**
+
+Both extractors used `except Exception: log.warning; continue` per-month,
+only hard-failing if ALL months failed. A partial failure (e.g., 2 months
+failing due to network interruption mid-bigrun) would silently produce an
+incomplete output with exit code 0.
+
+*Fix:* Both scripts now track `expected_months` (set of all `(year, month)`
+tuples in the configured window) and `fetched_months`/`normalized_months`
+(actually completed). After the loop, `missing_months = expected_months - fetched_months`
+triggers a hard `sys.exit(1)` with a specific error listing the missing months
+and the `--force` remedy.
+
+**Finding 8: Cache-key collision for `discovered_airports.csv` (script 13)**
+
+`13_extract_bts_hubspoke.py` wrote a single global `discovered_airports.csv`
+regardless of run_mode. A `test`-mode run (DFW-only) would overwrite the
+local-mode discovered-airport list, corrupting `14_extract_weather_hubspoke.py`'s
+station coverage on the next local-mode run.
+
+*Fix:* Script 13 now writes `discovered_airports_{run_mode}.csv`. Script 14's
+`--airports` argument defaults to `"auto"`, which resolves the run_mode-keyed path
+automatically in `main()` after loading `study.yaml` and resolving `run_mode`.
+
+**Finding 9: `iterrows()` loop in `_add_utc_keys` (script 21)**
+
+`_add_utc_keys` in `21_build_hubspoke_fact.py` looped row-by-row with
+`for _, row in bts.iterrows()`, calling per-row timezone logic via `_hhmm_to_utc`
+and `_get_tz`. At 3.59M flights for the local-mode run this would have been
+prohibitively slow for the bigrun (~20M+ flights).
+
+*Fix:* `_add_utc_keys` fully vectorized using the per-timezone-group approach
+(iterate over unique timezone names, ~50 groups for the full US network, rather
+than over rows). Uses `pd.Series.dt.tz_localize()` per group, which is
+O(rows in group) in pandas' C layer. Dead code removed: `_hhmm_to_utc`,
+`_get_tz`, `_TZ_CACHE`, `UTC = ZoneInfo("UTC")`, and the `datetime`/`zoneinfo`
+imports that were only needed by those functions.
+
+**Finding 10: Misleading `or "benign"` idiom in `join_weather` (script 21)**
+
+`merged.apply(lambda r: _worst_bucket(r.get("wx_dep_bucket") or "benign", ...), axis=1)`
+— the `or "benign"` does NOT coerce NaN to "benign" because NaN is truthy in Python.
+NaN passes through to `_worst_bucket` where it maps to rank -1. The idiom was
+both misleading and used an `apply()` loop on a potentially multi-million-row frame.
+
+*Fix:* Replaced `apply()` with a vectorized rank-map + `np.maximum()`:
+```python
+dep_rank = merged["wx_dep_bucket"].map(BUCKET_RANK).fillna(-1).astype(int)
+arr_rank = merged["wx_arr_bucket"].map(BUCKET_RANK).fillna(-1).astype(int)
+merged["weather_bucket"] = np.maximum(dep_rank, arr_rank).map(RANK_BUCKET)
+```
+Added an inline comment explaining the NaN semantics and the known downward bias
+of single-endpoint-miss flights. `_worst_bucket` removed as dead code.
+
+#### Tier 4 — Correctness / cosmetic
+
+**Finding 11: Dead `EXCLUDE_FROM_SCORING` constant (script 34)**
+
+`EXCLUDE_FROM_SCORING = {"Other_or_non_AA"}` was defined at module level but
+never referenced; the exclusion was done inline in `main()` via a string compare.
+
+*Fix:* Constant removed.
+
+**Finding 12: Unused `scenario_name` parameter in `compute_hotspot_score` (script 34)**
+
+The parameter was passed to the function but never used inside it.
+
+*Fix:* Parameter removed from signature and all call sites.
+
+**Finding 13: FlightAware prefix matching (script 15)**
+
+`ident.startswith(prefix)` on a 2-char IATA prefix matched any ident starting with
+those two letters, including longer codes like "ASA..." that coincidentally share
+a prefix with "AS" (Alaska Airlines).
+
+*Fix:* Added digit-boundary check — `ident.startswith(prefix) and ident[len(prefix)].isdigit()`.
+IATA flight identifiers are always [2-char code][digits], so this is both
+correct and stricter without over-filtering real codeshares.
+
+**Finding 14: No multi-brand conflict detection in FlightAware resolution (script 15)**
+
+`resolve_brand_from_response()` returned on the first matching codeshare prefix,
+with no check for cases where multiple mainline brands appear in the same flight's
+codeshare list (data error or ambiguous response).
+
+*Fix:* Now collects all matching contracts into a `set`. Returns the single resolved
+class if exactly 1 match; logs a warning and returns `None` (unresolved) if more
+than 1 match.
+
+**Finding 15: Weak date filter in FlightAware resolution (script 15)**
+
+The date filter only checked `scheduled_out`/`scheduled_off`; if both were absent,
+the flight entry was passed through regardless of date — risking a wrong-day
+codeshare match.
+
+*Fix:* Extended the fallback chain to also check `estimated_out`, `estimated_off`,
+`actual_out`, `actual_off`. If no date context is available from any field, the
+flight entry is now skipped rather than passed through.
+
+**Finding 16: `rate guard .clip(lower=1)` limitation undisclosed**
+
+The `flights_total.clip(lower=1)` and `operated_count.clip(lower=1)` denominators
+guard against division-by-zero but produce nonsensical rates (≥100%) for 0-flight
+cells that could theoretically receive a count from the aggregation. No 0-flight
+cells exist in practice (groupby only produces rows that exist in the data), so
+this is informational only and was not changed.
+
+*Disclosure added:* Noted in Tier 4 review findings; no code change.
+
+### Summary table
+
+| # | File | Change | Tier |
+|---|------|--------|------|
+| 1 | `config/study.yaml` | Added `hotspot_min_adv_flights: 30` | 1 |
+| 2 | `34_analyze_fragility_hotspots.py` | min_adv_flights gate in `normalize_components` | 1 |
+| 3 | `34_analyze_fragility_hotspots.py` | `compute_hotspot_score` rewritten: vectorized, NaN-aware, param removed | 1/4 |
+| 4 | `34_analyze_fragility_hotspots.py` | `compute_robustness` uses score notna mask | 1 |
+| 5 | `34_analyze_fragility_hotspots.py` | Persistence threshold logged; caveats expanded | 1/2 |
+| 6 | `33_analyze_fragility_operator.py` | Top-cell selection gates on min_sample_threshold | 1 |
+| 7 | `33_analyze_fragility_operator.py` | QA notes: mixed-denominator + self-inclusive baseline caveats | 2 |
+| 8 | `13_extract_bts_hubspoke.py` | Window-completeness assertion; hard-fail on missing months | 3 |
+| 9 | `13_extract_bts_hubspoke.py` | `discovered_airports_{run_mode}.csv` run_mode keying | 3 |
+| 10 | `14_extract_weather_hubspoke.py` | Window-completeness assertion | 3 |
+| 11 | `14_extract_weather_hubspoke.py` | `--airports auto` resolves run_mode-keyed discovered-airports path | 3 |
+| 12 | `21_build_hubspoke_fact.py` | `_add_utc_keys` vectorized; dead helpers removed | 3 |
+| 13 | `21_build_hubspoke_fact.py` | `join_weather` vectorized; `or "benign"` replaced + commented | 3 |
+| 14 | `34_analyze_fragility_hotspots.py` | Dead `EXCLUDE_FROM_SCORING` removed | 4 |
+| 15 | `15_resolve_operator_ambiguity.py` | Digit-boundary prefix check + multi-brand conflict detection | 4 |
+| 16 | `15_resolve_operator_ambiguity.py` | Date filter strengthened; unverifiable-date entries skipped | 4 |
+
+---
+
+*End of After Action Report — Iterations 2–8*

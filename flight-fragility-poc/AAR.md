@@ -1,6 +1,6 @@
-# After Action Report — Flight Fragility POC, Iterations 2–7
+# After Action Report — Flight Fragility POC, Iterations 2–9
 
-**Date:** 2026-06-15 (Iteration 2) — 2026-06-17 (Iterations 6–7)
+**Date:** 2026-06-15 (Iteration 2) — 2026-06-18 (Iteration 9)
 **Agent:** Claude (claude-sonnet-4-6)
 **Repository:** jumpkey/tailspin
 **Branch:** claude/trusting-allen-0he9md
@@ -1198,4 +1198,95 @@ this is informational only and was not changed.
 
 ---
 
-*End of After Action Report — Iterations 2–8*
+## Iteration 9 — Structural Defensibility Fixes (2026-06-18)
+
+**Commit:** `17053f4`
+**Branch:** `claude/trusting-allen-0he9md` (merged to `main`)
+**Trigger:** Post-Iteration-8 honest review identified two structural gaps that
+remained unfixed after the 16-item hardening pass and that could undermine
+the credibility of headline outputs from the bigrun.
+
+### Background
+
+The Iteration 8 review produced a gap list. Two items were categorized as
+structural rather than cosmetic: (1) an inconsistent severe-delay definition
+that violated the subset relationship between component metrics, and (2) mixed
+denominators in the combined fragility score that implicitly penalized carriers
+differently depending on their cancellation strategy. Both were authorized for
+fixing before bigrun output reaches any external audience.
+
+### Finding 1 — Incoherent severe-delay subset relationship
+
+**Root cause:**
+`severe_delay_flag` (used in Fragility I and as the basis for `norm_severe_delay`)
+was defined as **arrival delay ≥ threshold** (arrival-only). But
+`controllable_severe_delay_flag` and `late_arriving_severe_delay_flag` — which are
+logical subsets of `severe_delay_flag` — were defined as **(departure OR arrival)
+≥ threshold** in both `20_build_flight_fact.py` and `21_build_hubspoke_fact.py`.
+
+This created a contradiction: a flight with departure delay = 80 min and arrival
+delay = 30 min would receive `severe_delay_flag = 0` but
+`controllable_severe_delay_flag = 1` if air-carrier-attributed. At the cell level,
+`controllable_severe_delay_count` could exceed `severe_delay_count` — a logically
+incoherent outcome for a metric that is supposed to be a strict subset of the
+parent.
+
+**Fix:**
+Both fact builders now use **arrival-only** (`arr_delay_min >= threshold`) for
+all three severe-delay flags, consistent with the DOT/BTS standard metric and with
+the existing `severe_delay_flag` definition. The subset relationship
+`controllable_severe_delay_count ≤ severe_delay_count` and
+`late_arriving_severe_delay_count ≤ severe_delay_count` now holds unconditionally
+at every (hub, spoke, operator_class, period, weather_bucket) cell.
+
+**Files changed:**
+- `scripts/20_build_flight_fact.py` — `derive_fragility_ii_flags()`: replaced `severe_either` (dep OR arr) with `severe_arr` (arr only)
+- `scripts/21_build_hubspoke_fact.py` — `derive_fragility_ii_flags()`: same change
+
+### Finding 2 — Mixed denominators in combined fragility score
+
+**Root cause:**
+`aggregate_grain()` in `33_analyze_fragility_operator.py` and `aggregate_cells()`
+in `34_analyze_fragility_hotspots.py` used **different denominators** for the four
+components of `combined_fragility_score`:
+
+| Component | Denominator (before fix) |
+|-----------|--------------------------|
+| `cancellation_rate` | `flights_total` |
+| `severe_delay_rate` | `operated_count` |
+| `controllable_severe_delay_rate` | `operated_count` |
+| `late_arriving_severe_delay_rate` | `operated_count` |
+
+`operated_count` excludes cancelled flights, so it is always ≤ `flights_total`.
+This made the weighted sum compare rates computed over different sample spaces.
+More critically, it introduced a selection-bias artifact: a carrier that cancels
+aggressively removes its worst-performing flights from the delay denominator,
+producing lower apparent delay rates than a carrier that operates through and
+incurs the delay. The combined score would therefore systematically favor
+aggressive-cancellation strategies in the delay components even while penalizing
+them in the cancellation component.
+
+**Fix:**
+All four rates in both `aggregate_grain()` and `aggregate_cells()` now use
+`flights_total` as their denominator. This gives unconditional probabilities over
+the full scheduled sample — every component now answers the question "what fraction
+of all scheduled departures resulted in this outcome?" regardless of whether the
+flight was cancelled or operated.
+
+**Files changed:**
+- `scripts/33_analyze_fragility_operator.py` — `aggregate_grain()`: changed `operated_count` → `flights_total` for `severe_delay_rate`, `controllable_severe_delay_rate`, `late_arriving_severe_delay_rate`; updated QA note
+- `scripts/34_analyze_fragility_hotspots.py` — `aggregate_cells()`: same change for `controllable_severe_delay_rate` and `late_arriving_severe_delay_rate` (`severe_delay_rate` was already correct)
+
+### Summary table
+
+| # | File | Change |
+|---|------|--------|
+| 1 | `20_build_flight_fact.py` | `controllable_severe_delay_flag` and `late_arriving_severe_delay_flag` use arrival-only severe definition |
+| 2 | `21_build_hubspoke_fact.py` | Same arrival-only fix (mirrors script 20) |
+| 3 | `33_analyze_fragility_operator.py` | `severe_delay_rate`, `controllable_severe_delay_rate`, `late_arriving_severe_delay_rate` denominator → `flights_total` |
+| 4 | `33_analyze_fragility_operator.py` | QA note updated to reflect now-homogeneous denominators |
+| 5 | `34_analyze_fragility_hotspots.py` | `controllable_severe_delay_rate`, `late_arriving_severe_delay_rate` denominator → `flights_total` |
+
+---
+
+*End of After Action Report — Iterations 2–9*

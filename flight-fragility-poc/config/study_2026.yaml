@@ -1,0 +1,95 @@
+# 2026 carve-out study config.
+# Identical to study.yaml EXCEPT the temporal split: baseline = 2024-2025,
+# recent = 2026 (Jan-Apr, the BTS-published months as of June 2026). This lets
+# period_flag (set at baseline_end in the fact builders) cleanly separate
+# "2024-2025" (baseline) from "2026" (recent) for the carve-out comparison.
+# Curated outputs are written to *_2026 paths by run_2026_carveout.sh so the
+# committed 2024-vs-2025 analysis is never overwritten.
+
+study_start: "2024-01-01"
+study_end:   "2026-04-30"
+
+baseline_start: "2024-01-01"
+baseline_end:   "2025-12-31"     # CARVE-OUT: baseline now spans 2024-2025
+recent_start:   "2026-01-01"     # CARVE-OUT: recent = 2026
+recent_end:     "2026-04-30"
+
+delay_threshold_minutes: 60
+min_route_flights: 100
+min_sample_threshold: 30
+
+weather_bucket_logic:
+  benign:
+    aspm_levels_allowed: ["None", "Minor"]
+  marginal:
+    aspm_levels_allowed: ["Moderate"]
+  adverse:
+    aspm_levels_allowed: ["Severe"]
+
+use_flightaware: false
+flightaware_mode: "validation_only"
+
+run_mode: "bigrun"
+backend: "duckdb"
+
+run_mode_hubs:
+  test:  ["DFW"]
+  local: ["DFW", "CLT", "ORD", "PHL"]
+  bigrun: ["DFW", "CLT", "ORD", "PHL", "MIA", "PHX", "DCA", "LAX", "JFK"]
+
+run_mode_window:
+  test:   { start: "2024-01-01", end: "2024-01-31" }
+  local:  { start: "2024-01-01", end: "2026-04-30" }
+  bigrun: { start: "2024-01-01", end: "2026-04-30" }
+
+operator_classes_config: "config/operator_classes.yaml"
+
+combined_fragility_score_weights:
+  w1_cancellation_rate: 0.25
+  w2_severe_delay_rate: 0.25
+  w3_controllable_severe_delay_rate: 0.25
+  w4_late_arriving_severe_delay_rate: 0.25
+
+hubspoke_economic_burden_baseline: "aa_system_average"
+
+resolve_operator_ambiguity:
+  enabled: true
+  max_queries: 200
+
+fragility_v:
+  hotspot_top_n: 20
+  hotspot_min_flights: 100
+  hotspot_min_adv_flights: 30
+  hotspot_score_weights:
+    base:
+      cancel: 0.1667
+      severe_delay: 0.1667
+      controllable: 0.1667
+      cascade: 0.1667
+      weather_sensitivity: 0.1667
+      economic_burden: 0.1667
+    weather_emphasis:
+      cancel: 0.10
+      severe_delay: 0.10
+      controllable: 0.10
+      cascade: 0.10
+      weather_sensitivity: 0.50
+      economic_burden: 0.10
+    controllable_cascade_emphasis:
+      cancel: 0.10
+      severe_delay: 0.10
+      controllable: 0.30
+      cascade: 0.30
+      weather_sensitivity: 0.10
+      economic_burden: 0.10
+    economic_emphasis:
+      cancel: 0.10
+      severe_delay: 0.10
+      controllable: 0.10
+      cascade: 0.10
+      weather_sensitivity: 0.10
+      economic_burden: 0.50
+  exclude_from_operator_rollup:
+    - SkyWest_unresolved
+    - Republic_unresolved
+    - Other_or_non_AA

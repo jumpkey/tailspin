@@ -49,3 +49,7 @@ BTS_hubspoke,bts_hubspoke_bigrun_2025_09.csv,248016,2026-06-20T23:07:07.721617+0
 BTS_hubspoke,bts_hubspoke_bigrun_2025_10.csv,269177,2026-06-20T23:07:59.607649+00:00,c27f58c09879b860,"year=2025,month=10,hubs=['CLT', 'DCA', 'DFW', 'JFK', 'LAX', 'MIA', 'ORD', 'PHL', 'PHX'],run_mode=bigrun"
 BTS_hubspoke,bts_hubspoke_bigrun_2025_11.csv,253273,2026-06-20T23:08:50.693635+00:00,a10ddf9e07d4748d,"year=2025,month=11,hubs=['CLT', 'DCA', 'DFW', 'JFK', 'LAX', 'MIA', 'ORD', 'PHL', 'PHX'],run_mode=bigrun"
 BTS_hubspoke,bts_hubspoke_bigrun_2025_12.csv,257146,2026-06-20T23:09:42.373646+00:00,01e387c7bccfefa5,"year=2025,month=12,hubs=['CLT', 'DCA', 'DFW', 'JFK', 'LAX', 'MIA', 'ORD', 'PHL', 'PHX'],run_mode=bigrun"
+BTS_hubspoke,bts_hubspoke_bigrun_2026_01.csv,242908,2026-06-21T22:47:44.679525+00:00,62bff850d0254c6c,"year=2026,month=1,hubs=['CLT', 'DCA', 'DFW', 'JFK', 'LAX', 'MIA', 'ORD', 'PHL', 'PHX'],run_mode=bigrun"
+BTS_hubspoke,bts_hubspoke_bigrun_2026_02.csv,228819,2026-06-21T22:48:29.308575+00:00,ca4836369a3825a8,"year=2026,month=2,hubs=['CLT', 'DCA', 'DFW', 'JFK', 'LAX', 'MIA', 'ORD', 'PHL', 'PHX'],run_mode=bigrun"
+BTS_hubspoke,bts_hubspoke_bigrun_2026_03.csv,270281,2026-06-21T22:49:21.501040+00:00,5396c94fc621c5cc,"year=2026,month=3,hubs=['CLT', 'DCA', 'DFW', 'JFK', 'LAX', 'MIA', 'ORD', 'PHL', 'PHX'],run_mode=bigrun"
+BTS_hubspoke,bts_hubspoke_bigrun_2026_04.csv,268950,2026-06-21T22:50:13.381143+00:00,6c96bcad769c01a1,"year=2026,month=4,hubs=['CLT', 'DCA', 'DFW', 'JFK', 'LAX', 'MIA', 'ORD', 'PHL', 'PHX'],run_mode=bigrun"

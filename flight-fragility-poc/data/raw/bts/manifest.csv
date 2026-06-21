@@ -47,3 +47,7 @@ BTS,bts_2025_09.csv,119755,2026-06-20T22:36:24.736931+00:00,cffab66d026538a1,"ye
 BTS,bts_2025_10.csv,127471,2026-06-20T22:37:05.759008+00:00,1798eeb539ba6f4d,"year=2025,month=10,airports=['AEX', 'ATL', 'BTR', 'DFW', 'GPT', 'IAH', 'LFT', 'MLU', 'SHV']"
 BTS,bts_2025_11.csv,119647,2026-06-20T22:37:44.377310+00:00,43ad406126d21d1e,"year=2025,month=11,airports=['AEX', 'ATL', 'BTR', 'DFW', 'GPT', 'IAH', 'LFT', 'MLU', 'SHV']"
 BTS,bts_2025_12.csv,120749,2026-06-20T22:38:24.470425+00:00,eae2c9ddd4217cc7,"year=2025,month=12,airports=['AEX', 'ATL', 'BTR', 'DFW', 'GPT', 'IAH', 'LFT', 'MLU', 'SHV']"
+BTS,bts_2026_01.csv,114649,2026-06-21T22:34:12.213149+00:00,48757d084d48992d,"year=2026,month=1,airports=['AEX', 'ATL', 'BTR', 'DFW', 'GPT', 'IAH', 'LFT', 'MLU', 'SHV']"
+BTS,bts_2026_02.csv,105879,2026-06-21T22:34:48.446617+00:00,a6f14ff88fc85c48,"year=2026,month=2,airports=['AEX', 'ATL', 'BTR', 'DFW', 'GPT', 'IAH', 'LFT', 'MLU', 'SHV']"
+BTS,bts_2026_03.csv,123795,2026-06-21T22:35:31.220063+00:00,924762499c6b74b8,"year=2026,month=3,airports=['AEX', 'ATL', 'BTR', 'DFW', 'GPT', 'IAH', 'LFT', 'MLU', 'SHV']"
+BTS,bts_2026_04.csv,122077,2026-06-21T22:36:12.970397+00:00,64d3ffe648add53f,"year=2026,month=4,airports=['AEX', 'ATL', 'BTR', 'DFW', 'GPT', 'IAH', 'LFT', 'MLU', 'SHV']"

@@ -67,9 +67,12 @@ gently suggest that a pattern an outside passenger can find in an afternoon is o
 worth surfacing internally — both for the operation and for the travelers who
 experience these corridors month after month.
 
-I am happy to share my full methodology, data sources, and the specific cell-level
-results so your teams can check the work against your own records. I have no
-commercial interest here; I would simply like these corridors to get better.
+I am happy to share my full methodology, data sources, and the specific route-level
+results so your teams can check the work against your own records. To remove any
+doubt, the complete source code is publicly available at [repository URL] — every
+figure reproduces from the public data, and I would welcome being told where, if
+anywhere, I have it wrong. I have no commercial interest here; I would simply like
+these corridors to get better.
 
 Respectfully,
 
@@ -78,5 +81,6 @@ Respectfully,
 
 ---
 
-*Enclosures available on request: methodology summary, ranked cell list, data
-source manifest. All figures reproducible from public BTS and NOAA data.*
+*Enclosures available on request: methodology summary, ranked route list, data
+source manifest. All figures reproducible from public BTS and NOAA data via the
+public repository at [repository URL].*

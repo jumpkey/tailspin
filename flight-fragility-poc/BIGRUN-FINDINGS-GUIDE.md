@@ -118,6 +118,27 @@ point the same direction.
 
 ---
 
+## 3a. 2026 carve-out — does the pattern persist? (Jan–Apr, season-matched)
+
+A follow-on run extended the data through the BTS-published 2026 months (Jan–Apr)
+with a clean `baseline = 2024-25` / `recent = 2026` split, written to separate
+`*_2026` curated paths (committed analysis untouched). 2026 is compared
+**season-matched** to the same months of 2024–25 to remove winter bias.
+
+**The pattern persists, and on several measures worsens:**
+- **PSA remained the worst operator and worsened** season-matched (Jan–Apr): cancel
+  4.2% → 6.3%, severe-delay 9.5% → 11.2%. **Envoy remained the cleanest and stable**
+  (cancel 2.4% → 2.7%, severe 6.3% → 6.6%). AA mainline cancellations more than
+  doubled (1.5% → 3.4%) while its delay rate held.
+- **The worst hubs stayed worst and climbed:** ORD severe-delay 9.3% → 11.6%, DCA
+  9.1% → 10.5% — the top two, both rising. LAX/PHX remained the cleanest (~5.5–5.9%).
+- **DFW–LFT did not improve;** it shifted to near-total PSA operation in 2026 and its
+  knock-on-delay rate rose ~39% season-matched (small-sample caveat applies). See
+  [reports/DFW_LFT_FOCAL_REPORT.md](reports/DFW_LFT_FOCAL_REPORT.md).
+
+Caveat: 2026 is a four-month partial year; cell-level weather-stratified samples are
+small and treated as directional. Network operator/hub aggregates are well-sampled.
+
 ## 4. What is observably true vs. what we do not claim
 
 This study reports **associations in public data**. It is deliberately
@@ -259,8 +280,11 @@ prerequisite gating and a stable log symlink.
 
 | If you want… | Read |
 |---|---|
-| The formal write-up framing | [reports/FRAGILITY_NETWORK_REPORT_DRAFT.md](reports/FRAGILITY_NETWORK_REPORT_DRAFT.md) |
-| Draft outreach to American leadership | [reports/letters/letter_AA_stakeholders_DRAFT.md](reports/letters/letter_AA_stakeholders_DRAFT.md) |
+| **The DFW–LFT single-corridor case study** | **[reports/DFW_LFT_FOCAL_REPORT.md](reports/DFW_LFT_FOCAL_REPORT.md)** |
+| The formal network write-up framing | [reports/FRAGILITY_NETWORK_REPORT_DRAFT.md](reports/FRAGILITY_NETWORK_REPORT_DRAFT.md) |
+| Plain-language exec chart specs (awaiting approval) | [reports/CHART_SPECS_DRAFT.md](reports/CHART_SPECS_DRAFT.md) |
+| Draft outreach to the AA CEO (strategic) | [reports/letters/letter_AA_CEO_DRAFT.md](reports/letters/letter_AA_CEO_DRAFT.md) |
+| Draft outreach to AA operational leadership | [reports/letters/letter_AA_stakeholders_DRAFT.md](reports/letters/letter_AA_stakeholders_DRAFT.md) |
 | Draft outreach to PSA / Envoy leadership | [reports/letters/letter_PSA_Envoy_stakeholders_DRAFT.md](reports/letters/letter_PSA_Envoy_stakeholders_DRAFT.md) |
 | Stakeholder-segmented talking points | [LEADERSHIP_READOUT_NOTES.md](LEADERSHIP_READOUT_NOTES.md) Entry 4 |
 | Engineering / methodology history | [AAR.md](AAR.md) Iteration 10 |

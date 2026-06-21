@@ -64,9 +64,11 @@ My question to both operators is the same one I am putting to American:
 
 If so, I am glad the work is in hand. If not, a pattern visible from outside with
 public data seems worth examining inside. I am happy to share the full
-methodology, sources, and cell-level results so your teams can check it against
-your own records. I have no commercial interest; I would like these corridors to
-improve for the people who fly them.
+methodology, sources, and route-level results so your teams can check it against
+your own records — and the complete source code is publicly available at
+[repository URL], so every figure can be reproduced and challenged. I have no
+commercial interest; I would like these corridors to improve for the people who
+fly them.
 
 Respectfully,
 
@@ -75,5 +77,6 @@ Respectfully,
 
 ---
 
-*Enclosures available on request: methodology summary, ranked cell list, data
-source manifest. All figures reproducible from public BTS and NOAA data.*
+*Enclosures available on request: methodology summary, ranked route list, data
+source manifest. All figures reproducible from public BTS and NOAA data via the
+public repository at [repository URL].*

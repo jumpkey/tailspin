@@ -1,9 +1,11 @@
 {
   "qa_notes": [
-    "18 operator/hub/weather/period cells have fewer than 30 flights (min_sample_threshold) \u2014 treat their rates as indicative only.",
-    "485,006 flights remain in an unresolved operator-ambiguity label (SkyWest_unresolved / Republic_unresolved) and are excluded from operator-class comparisons; see scripts/15_resolve_operator_ambiguity.py.",
+    "30 operator/hub/weather/period cells have fewer than 30 flights (min_sample_threshold) \u2014 treat their rates as indicative only.",
+    "904,924 flights remain in an unresolved operator-ambiguity label (SkyWest_unresolved / Republic_unresolved) and are excluded from operator-class comparisons; see scripts/15_resolve_operator_ambiguity.py.",
     "combined_fragility_score weights used: {'w1_cancellation_rate': 0.25, 'w2_severe_delay_rate': 0.25, 'w3_controllable_severe_delay_rate': 0.25, 'w4_late_arriving_severe_delay_rate': 0.25}",
-    "Modules present: ['focal_corridor', 'hub_spoke']"
+    "Modules present: ['focal_corridor', 'hub_spoke']",
+    "All four combined_fragility_score components use flights_total as their denominator (unconditional probability over the full scheduled sample). This ensures the weighted sum compares outcomes over the same sample space for every component.",
+    "Module B economic baseline (aa_system_average) pools all resolved operator classes within the same hub\u00d7weather\u00d7period cell \u2014 it is NOT leave-one-out. High-volume operators with above-average fragility partially suppress their own excess signal against this baseline."
   ],
   "combined_fragility_score_weights": {
     "w1_cancellation_rate": 0.25,
@@ -28,12 +30,17 @@
   ],
   "hub_families_present": [
     "CLT",
+    "DCA",
     "DFW",
+    "JFK",
+    "LAX",
+    "MIA",
     "ORD",
     "PHL",
+    "PHX",
     "focal_corridor"
   ],
-  "chart_annotation": "Across the included AA network slices, PSA_operated at ORD shows the highest combined fragility score (0.225) among cells with 186 flights.",
+  "chart_annotation": "Across the included AA network slices, PSA_operated at ORD shows the highest combined fragility score (0.187) among cells with at least 30 flights (186 flights in this cell).",
   "top_cell": {
     "module": "hub_spoke",
     "operator_class": "PSA_operated",
@@ -50,17 +57,17 @@
     "carrier_delay_minutes_sum": 2577.0,
     "late_aircraft_delay_minutes_sum": 6448.0,
     "cancellation_rate": 0.2258,
-    "severe_delay_rate": 0.3958,
+    "severe_delay_rate": 0.3065,
     "controllable_cancel_rate": 0.0,
-    "controllable_severe_delay_rate": 0.0625,
-    "late_arriving_severe_delay_rate": 0.2153,
+    "controllable_severe_delay_rate": 0.0484,
+    "late_arriving_severe_delay_rate": 0.1667,
     "weather_fragility_rate": 0.5323,
     "baseline_label": "aa_system_average",
-    "excess_cancelled_vs_baseline": 22.5,
-    "excess_controllable_delay_minutes": 1435.5,
-    "excess_cascade_delay_minutes": 4229.1,
-    "economic_burden_proxy_usd": 581539.69,
-    "economic_burden_proxy_usd_per_1000_flights": 3126557.49,
-    "combined_fragility_score": 0.2249
+    "excess_cancelled_vs_baseline": 22.27,
+    "excess_controllable_delay_minutes": 1441.6,
+    "excess_cascade_delay_minutes": 4209.2,
+    "economic_burden_proxy_usd": 580079.35,
+    "economic_burden_proxy_usd_per_1000_flights": 3118706.2,
+    "combined_fragility_score": 0.1868
   }
 }

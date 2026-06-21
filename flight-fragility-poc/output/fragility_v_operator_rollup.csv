@@ -1,3 +1,4 @@
 operator_class,hotspot_count,total_flights_in_top_n,share_of_top_n
-PSA_operated,10,4683,0.6666666666666666
-AA_mainline,5,8765,0.3333333333333333
+PSA_operated,10,7279,0.5882352941176471
+AA_mainline,6,7608,0.35294117647058826
+Envoy_operated,1,120,0.058823529411764705

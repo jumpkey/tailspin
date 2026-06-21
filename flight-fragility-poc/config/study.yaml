@@ -26,13 +26,16 @@ flightaware_mode: "validation_only"
 # See flight_fragility_iv_operator_attribution_spec.md, "Architecture and
 # build location" for the reasoning behind these defaults.
 # ---------------------------------------------------------------------------
-run_mode: "test"          # test | local | bigrun
-backend: "pandas"         # pandas | duckdb | polars
+run_mode: "bigrun"        # test | local | bigrun
+backend: "duckdb"         # pandas | duckdb | polars
 
 run_mode_hubs:
   test:  ["DFW"]
   local: ["DFW", "CLT", "ORD", "PHL"]
-  bigrun: []               # empty == full configured network; set explicitly for a bigrun
+  # Full American Airlines hub network (mainline operational hubs + LAX/JFK
+  # gateways). NOTE: an empty list raises ValueError in resolve_scope() —
+  # bigrun must always be set explicitly.
+  bigrun: ["DFW", "CLT", "ORD", "PHL", "MIA", "PHX", "DCA", "LAX", "JFK"]
 
 run_mode_window:
   test:   { start: "2024-01-01", end: "2024-01-31" }

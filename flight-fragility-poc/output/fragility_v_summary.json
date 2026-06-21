@@ -1,22 +1,27 @@
 {
-  "run_mode": "local",
+  "run_mode": "bigrun",
   "hubs_in_scope": [
     "CLT",
+    "DCA",
     "DFW",
+    "JFK",
+    "LAX",
+    "MIA",
     "ORD",
-    "PHL"
+    "PHL",
+    "PHX"
   ],
   "top_n": 20,
   "hotspot_min_flights": 100,
-  "total_cells": 1304,
-  "cells_meeting_min_flights": 1070,
+  "total_cells": 2093,
+  "cells_meeting_min_flights": 1668,
   "scenario_names": [
     "base",
     "weather_emphasis",
     "controllable_cascade_emphasis",
     "economic_emphasis"
   ],
-  "annotation": "The highest-scoring cell (base scenario) is ORD-SPI operated by SkyWest_unresolved, with a base hotspot score of 0.9778 across 206 flights.",
+  "annotation": "The highest-scoring cell (base scenario) is ORD-SPI operated by SkyWest_unresolved, with a base hotspot score of 0.9823 across 206 flights.",
   "top_cell": {
     "hub_family": "ORD",
     "spoke_airport": "SPI",
@@ -25,85 +30,103 @@
     "operated_count": 193,
     "cancelled_count": 13,
     "severe_delay_count": 56,
-    "controllable_severe_delay_count": 32,
+    "controllable_severe_delay_count": 28,
     "late_arriving_severe_delay_count": 17,
     "cascade_delay_count": 28,
     "carrier_delay_min_sum": 4405.0,
     "late_aircraft_delay_min_sum": 2549.0,
     "cancellation_rate": 0.06310679611650485,
     "severe_delay_rate": 0.27184466019417475,
-    "controllable_severe_delay_rate": 0.16580310880829016,
-    "late_arriving_severe_delay_rate": 0.08808290155440414,
+    "controllable_severe_delay_rate": 0.13592233009708737,
+    "late_arriving_severe_delay_rate": 0.0825242718446602,
     "adv_flights": 8.0,
     "adverse_weather_fragility_rate": 0.875,
     "economic_burden_per_1k": 5690494.368932039,
-    "norm_cancel": 0.9869158878504672,
-    "norm_severe_delay": 0.9981308411214953,
-    "norm_controllable": 0.9990654205607477,
-    "norm_cascade": 0.8953271028037383,
-    "norm_weather_sensitivity": 0.991588785046729,
-    "norm_economic_burden": 0.994392523364486,
-    "hotspot_score_base": 0.9777656074766354,
-    "hotspot_score_weather_emphasis": 0.983177570093458,
-    "hotspot_score_controllable_cascade_emphasis": 0.9654205607476635,
-    "hotspot_score_economic_emphasis": 0.9842990654205608,
+    "norm_cancel": 0.9838129496402878,
+    "norm_severe_delay": 0.9988009592326139,
+    "norm_controllable": 0.9988009592326139,
+    "norm_cascade": 0.934052757793765,
+    "norm_weather_sensitivity": NaN,
+    "norm_economic_burden": 0.9958033573141487,
+    "meets_min_adv_flights": false,
+    "hotspot_score_base": 0.982254196642686,
+    "hotspot_score_weather_emphasis": 0.982254196642686,
+    "hotspot_score_controllable_cascade_emphasis": 0.9752198241406875,
+    "hotspot_score_economic_emphasis": 0.9882760458300027,
     "hotspot_robustness_score": 1.0,
-    "dominant_component": "controllable",
+    "dominant_component": "unknown",
     "meets_min_flights": true,
     "is_persistent": false
   },
-  "n_persistent_in_top_n": 3,
+  "n_persistent_in_top_n": 1,
   "dominant_component_distribution": {
-    "economic_burden": 7,
-    "cascade": 5,
-    "severe_delay": 4,
-    "cancel": 2,
-    "controllable": 1,
-    "weather_sensitivity": 1
+    "unknown": 10,
+    "economic_burden": 3,
+    "weather_sensitivity": 3,
+    "cascade": 3,
+    "severe_delay": 1
   },
   "operator_rollup": [
     {
       "operator_class": "PSA_operated",
       "hotspot_count": 10,
-      "total_flights_in_top_n": 4683,
-      "share_of_top_n": 0.6666666666666666
+      "total_flights_in_top_n": 7279,
+      "share_of_top_n": 0.5882352941176471
     },
     {
       "operator_class": "AA_mainline",
-      "hotspot_count": 5,
-      "total_flights_in_top_n": 8765,
-      "share_of_top_n": 0.3333333333333333
+      "hotspot_count": 6,
+      "total_flights_in_top_n": 7608,
+      "share_of_top_n": 0.35294117647058826
+    },
+    {
+      "operator_class": "Envoy_operated",
+      "hotspot_count": 1,
+      "total_flights_in_top_n": 120,
+      "share_of_top_n": 0.058823529411764705
     }
   ],
   "hub_rollup": [
     {
       "hub_family": "DFW",
-      "hotspot_count": 10,
-      "total_flights_in_top_n": 10119,
-      "share_of_top_n": 0.5
+      "hotspot_count": 8,
+      "total_flights_in_top_n": 8305,
+      "share_of_top_n": 0.4
     },
     {
       "hub_family": "ORD",
-      "hotspot_count": 9,
-      "total_flights_in_top_n": 7051,
-      "share_of_top_n": 0.45
+      "hotspot_count": 8,
+      "total_flights_in_top_n": 5791,
+      "share_of_top_n": 0.4
     },
     {
-      "hub_family": "PHL",
+      "hub_family": "DCA",
+      "hotspot_count": 2,
+      "total_flights_in_top_n": 4344,
+      "share_of_top_n": 0.1
+    },
+    {
+      "hub_family": "CLT",
       "hotspot_count": 1,
-      "total_flights_in_top_n": 706,
+      "total_flights_in_top_n": 120,
+      "share_of_top_n": 0.05
+    },
+    {
+      "hub_family": "MIA",
+      "hotspot_count": 1,
+      "total_flights_in_top_n": 187,
       "share_of_top_n": 0.05
     }
   ],
   "qa_notes": [
-    "Total cells: 1,304; cells meeting min_flights=100: 1,070.",
+    "Total cells: 2,093; cells meeting min_flights=100: 1,668.",
     "Operator classes included in scoring: ['AA_mainline', 'Envoy_operated', 'PSA_operated', 'Republic_unresolved', 'SkyWest_unresolved'].",
-    "Hubs in scope: ['CLT', 'DFW', 'ORD', 'PHL'].",
-    "Spoke airports in scope: 239 distinct airports.",
-    "Persistent cells (top-20 in both baseline and recent periods): 3.",
+    "Hubs in scope: ['CLT', 'DCA', 'DFW', 'JFK', 'LAX', 'MIA', 'ORD', 'PHL', 'PHX'].",
+    "Spoke airports in scope: 249 distinct airports.",
+    "Persistent cells (top-20 in both baseline and recent periods): 1.",
     "Scenario names: ['base', 'weather_emphasis', 'controllable_cascade_emphasis', 'economic_emphasis'].",
-    "Dominant component distribution in top-20: {'economic_burden': 7, 'cascade': 5, 'severe_delay': 4, 'cancel': 2, 'controllable': 1, 'weather_sensitivity': 1}.",
-    "Operator rollup (resolved operators only, top-20): [{'operator_class': 'PSA_operated', 'hotspot_count': 10, 'total_flights_in_top_n': 4683, 'share_of_top_n': 0.6666666666666666}, {'operator_class': 'AA_mainline', 'hotspot_count': 5, 'total_flights_in_top_n': 8765, 'share_of_top_n': 0.3333333333333333}].",
-    "Hub rollup (top-20): [{'hub_family': 'DFW', 'hotspot_count': 10, 'total_flights_in_top_n': 10119, 'share_of_top_n': 0.5}, {'hub_family': 'ORD', 'hotspot_count': 9, 'total_flights_in_top_n': 7051, 'share_of_top_n': 0.45}, {'hub_family': 'PHL', 'hotspot_count': 1, 'total_flights_in_top_n': 706, 'share_of_top_n': 0.05}]."
+    "Dominant component distribution in top-20: {'unknown': 10, 'economic_burden': 3, 'weather_sensitivity': 3, 'cascade': 3, 'severe_delay': 1}.",
+    "Operator rollup (resolved operators only, top-20): [{'operator_class': 'PSA_operated', 'hotspot_count': 10, 'total_flights_in_top_n': 7279, 'share_of_top_n': 0.5882352941176471}, {'operator_class': 'AA_mainline', 'hotspot_count': 6, 'total_flights_in_top_n': 7608, 'share_of_top_n': 0.35294117647058826}, {'operator_class': 'Envoy_operated', 'hotspot_count': 1, 'total_flights_in_top_n': 120, 'share_of_top_n': 0.058823529411764705}].",
+    "Hub rollup (top-20): [{'hub_family': 'DFW', 'hotspot_count': 8, 'total_flights_in_top_n': 8305, 'share_of_top_n': 0.4}, {'hub_family': 'ORD', 'hotspot_count': 8, 'total_flights_in_top_n': 5791, 'share_of_top_n': 0.4}, {'hub_family': 'DCA', 'hotspot_count': 2, 'total_flights_in_top_n': 4344, 'share_of_top_n': 0.1}, {'hub_family': 'CLT', 'hotspot_count': 1, 'total_flights_in_top_n': 120, 'share_of_top_n': 0.05}, {'hub_family': 'MIA', 'hotspot_count': 1, 'total_flights_in_top_n': 187, 'share_of_top_n': 0.05}]."
   ]
 }

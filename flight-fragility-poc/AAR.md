@@ -1289,4 +1289,80 @@ flight was cancelled or operated.
 
 ---
 
-*End of After Action Report — Iterations 2–9*
+## Iteration 10 — Frankenserver Bigrun Execution (2026-06-21)
+
+**Trigger:** First national-scale execution of the full pipeline on a local
+high-memory server ("Frankenserver"), extending Fragility IV/V from the 4-hub
+local baseline to American Airlines' complete 9-hub network, run keyless (no
+FlightAware) to reproduce and stress the committed findings at scale.
+
+### Configuration
+
+- `config/study.yaml`: `run_mode: bigrun`, `backend: duckdb`,
+  `run_mode_hubs.bigrun: [DFW, CLT, ORD, PHL, MIA, PHX, DCA, LAX, JFK]`.
+- Note: an empty `bigrun: []` raises `ValueError` in
+  `13_extract_bts_hubspoke.py::resolve_scope()` — the prior inline comment
+  ("empty == full network") was misleading and was corrected. bigrun hubs must
+  be set explicitly.
+- New batch driver `scripts/run_bigrun.sh`: runs Fragility I–III → IV → V with
+  prerequisite gating between phases (refuses to start IV without
+  `flight_operability_fact.csv`; refuses V without the curated hub-spoke parquet),
+  a stable `logs/bigrun.latest.log` symlink, repo-root `.venv` detection, and a
+  loud FAILED banner on any phase error. Designed for `nohup` + `tail -f`.
+- FlightAware: key removed (`.env` commented), `use_flightaware: false`,
+  `resolve_operator_ambiguity` no-ops and writes an empty resolution file.
+
+### Execution
+
+- Wall-clock ~63 min on a 72-core / 503 GB host (I–III 23m17s, IV 38m41s,
+  V 42s). NOAA did not throttle materially; the feared multi-hour weather stretch
+  did not occur. duckdb made aggregation negligible.
+- **6,152,599 flights** (vs. 3,587,814 local), **264 airports** (9 hubs + 255
+  spokes), weather match **100.0%** (0.0% null rate; container baseline 96.6%).
+- All output artifacts produced; no failures.
+
+### Findings vs. local baseline
+
+- **Core finding robust to scale.** Fragility IV top cell unchanged
+  (PSA_operated / ORD / adverse / recent; combined score 0.187 vs. 0.225 local —
+  shift is renormalization against a now-9-hub `aa_system_average` baseline).
+  Fragility V rank-1 unchanged (ORD–SPI, base 0.982 vs. 0.978, robustness 1.00).
+- **DCA emerged** as a new top-20 hotspot hub (2 cells); PHL dropped out. Top-20
+  hub mix: DFW 40%, ORD 40%, DCA 10%, CLT 5%, MIA 5% (was DFW 50%/ORD 45%/PHL 5%).
+- **Volume ≠ fragility:** LAX/PHX/JFK (the largest new hubs by traffic) produced
+  zero top-20 hotspots.
+- **Operator over-representation quantified on non-arbitrary cuts** (full 1,668-
+  cell ranked universe): PSA_operated = 51.8% of worst-5% cells but 12.2% of
+  flights (**4.25× lift**); AA_mainline 31.3% / 50.0% (0.63×); Envoy_operated
+  2.4% / 14.6% (**0.16×**, under-represented). Mean base score: PSA 0.683 >
+  AA_mainline 0.575 > SkyWest_unresolved 0.487 > Republic_unresolved 0.360 >
+  Envoy 0.346. The PSA/Envoy divergence (two wholly-owned regionals at opposite
+  ends) is the keystone defensibility result against an anti-regional-bias claim.
+- **DFW–LFT corridor placed honestly:** PSA-operated cell ranks #63 of 1,668
+  (top 3.8%, cascade-dominated); SkyWest_unresolved #809; Envoy #1,060.
+
+### Caveats reaffirmed at scale
+
+- Operator ambiguity rose to **904,924 flights (14.7%)** unresolved and excluded
+  (was ~485K at 4 hubs); includes 12 of the worst-83 cells and the rank-1 cell.
+- Hub totals are run-mode-dependent (origin-priority attribution): DFW/ORD counts
+  are slightly *lower* than the 4-hub run despite more total flights — expected,
+  affects totals not cell rankings.
+- Small-cell thinness unchanged (30 cells <30 flights; many top cells <30 adverse
+  flights → weather-sensitivity unscored, dominant component "unknown").
+
+### Deliverables added this iteration
+
+- `BIGRUN-FINDINGS-GUIDE.md` (top-level master read-out).
+- `reports/FRAGILITY_NETWORK_REPORT_DRAFT.md` (formal write-up, draft).
+- `reports/letters/letter_AA_stakeholders_DRAFT.md`,
+  `reports/letters/letter_PSA_Envoy_stakeholders_DRAFT.md` (draft outreach).
+- `LEADERSHIP_READOUT_NOTES.md` Entry 4 (network synthesis).
+- `$100 FlightAware key` decision analysis (in the findings guide): optional, not
+  decision-critical; would name the rank-1 cell and resolve 14.7% ambiguity but
+  does not change the established direction; conservative exclusion is itself a
+  defensibility asset.
+
+---
+
+*End of After Action Report — Iterations 2–10*

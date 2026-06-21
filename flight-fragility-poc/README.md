@@ -4,6 +4,12 @@ A reproducible proof-of-concept analysis to determine whether American Airlines'
 regional service in LFT and nearby spoke markets shows greater weather-related
 schedule fragility than comparable peer markets.
 
+> 📌 **National-scale results are in — start with
+> [BIGRUN-FINDINGS-GUIDE.md](BIGRUN-FINDINGS-GUIDE.md).** The full pipeline has
+> been run across American's complete 9-hub network (6.15M flights, 24 months)
+> on a high-memory server. That guide is the top-level read-out; this README
+> remains the engineering/method reference.
+
 ## Business question
 
 > Does AA regional service in LFT and nearby small-spoke markets show a larger
@@ -322,6 +328,27 @@ python scripts/44_plot_fragility_hotspots.py
   paid lookback window. Keep `use_flightaware: false` for phase-1 runs.
 
 ## Results summary
+
+### Fragility IV/V — national bigrun (2026-06-21)
+
+> **Status: Full pipeline executed across American's complete 9-hub network**
+> (DFW, CLT, ORD, PHL, MIA, PHX, DCA, LAX, JFK), keyless, on a high-memory
+> server. **6,152,599 flights**, 264 airports, 24 months, duckdb backend,
+> 100.0% weather match, ~63 min wall-clock. See
+> [BIGRUN-FINDINGS-GUIDE.md](BIGRUN-FINDINGS-GUIDE.md) and
+> [AAR.md](AAR.md) Iteration 10.
+>
+> - **Core finding robust to scale:** Fragility IV top cell (PSA at ORD, adverse)
+>   and Fragility V rank-1 hotspot (ORD–SPI) unchanged from the 4-hub baseline.
+> - **PSA over-represented 4.25×** in the worst-5% of 1,668 ranked cells (51.8%
+>   of worst cells, 12.2% of flights); **Envoy under-represented (0.16×)** — a
+>   second wholly-owned regional at the opposite end, establishing the result is
+>   operating-structure-specific, not anti-regional.
+> - **DFW–LFT** (PSA-operated) ranks #63 of 1,668 (top 3.8%, cascade-driven).
+> - **904,924 flights (14.7%)** remain operator-ambiguous and are conservatively
+>   excluded from operator comparisons.
+
+### Fragility I — weather-stratified cancellation (focal corridor)
 
 > **Status: Pipeline implemented and run against live data for 2024-01-01
 > through 2025-12-31.**

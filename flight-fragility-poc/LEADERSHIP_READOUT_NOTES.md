@@ -503,3 +503,93 @@ highest-scoring cells are PSA-at-ORD rather than Envoy.
   no internal operational records, economic burden is a public-benchmark proxy not
   audited financials, mix effects across operator-class route universes, and
   small-sample caveats for individual cell numbers.
+
+## Entry 4 — Network bigrun synthesis (2026-06-21)
+
+### Source data
+
+- `output/fragility_v_hotspot_rankings.csv`, `output/fragility_v_summary.md`,
+  `output/fragility_v_hub_rollup.csv`, `output/fragility_v_operator_rollup.csv`
+- `output/fragility_iv_summary.json`, `output/qa_summary_hubspoke.csv`
+- `output/fragility_v_hotspot_scorecard.parquet` (full 2,093-cell scorecard,
+  queried directly for over-representation and DFW–LFT placement)
+- `BIGRUN-FINDINGS-GUIDE.md`, `reports/FRAGILITY_NETWORK_REPORT_DRAFT.md`,
+  `AAR.md` Iteration 10.
+
+### A. Top-level (CEO-level) read-out notes
+
+**What the bigrun adds.** Entries 1–3 measured a focal corridor and a 4-hub
+slice (3.59M flights). This pass extends the same method to American's complete
+9-hub network — **6,152,599 flights, 264 airports, 24 months** — and reaches the
+same conclusion the smaller slices did, now on 1.7× the data and across the whole
+hub system. The headline is **robustness**: scale did not dilute the finding.
+
+**The finding held at scale.** The single most fragile operator/hub cell
+(PSA-operated at ORD in adverse weather) and the rank-1 network hotspot (ORD–SPI)
+are unchanged from the 4-hub baseline. Expanding to MIA, PHX, DCA, LAX, JFK did
+not surface a different story — it confirmed the existing one and added one new
+hotspot hub (DCA).
+
+**The central, defensible statistic.** Across the full ranked universe of 1,668
+cells, PSA-operated cells are **4.25× over-represented** in the worst 5%
+(51.8% of the worst cells, 12.2% of flights). Crucially, the *other* wholly-owned
+American regional, Envoy, is **under**-represented (0.16×). Two structurally
+similar regional subsidiaries land at opposite ends — which is the cleanest
+possible evidence that this is an operating-structure pattern, not an
+"American Eagle / regional carriers" pattern and not an analytical bias. American
+mainline appears roughly in line with its 50% flight share throughout.
+
+**Framing for leadership.** The work now supports a sharper institutional point
+than Entry 3 could: not only does fragility concentrate in identifiable cells,
+but the entire result is reproducible from **public DOT and weather data in about
+an hour**. The CEO-level question this invites — fair, non-accusatory — is
+whether equivalent stress-testing exists internally and whether these same cells
+appear on it. (See the four governance questions in `BIGRUN-FINDINGS-GUIDE.md` §8.)
+
+### B. Executive discipline head notes (AA)
+
+- **Network Planning / Scheduling.** The cascade (late-inbound-aircraft)
+  signature dominates the worst cells over weather sensitivity — a scheduling and
+  routing question (turn times, bank architecture, equipment routing on thin
+  regional spokes) more than a weather-exposure question. DCA's new appearance
+  and PHL's exit from the top-20 are concrete prompts for a hub-by-hub structural
+  comparison.
+- **Integrated Operations Control / Hub Ops.** DFW and ORD again carry 80% of the
+  top-20; the largest gateways by volume (LAX/PHX/JFK) carry none. Disruption-
+  handling structure, not traffic volume, is where the signal lives.
+- **Regional / Express Division oversight.** The PSA-vs-Envoy divergence is the
+  most actionable operator-level result the study has produced. Both are wholly
+  owned; both fly American's schedule and brand. A direct PSA-vs-Envoy comparison
+  at matched hub-spoke-weather cells — controlling for the route universes each
+  serves — is the natural internal follow-up.
+- **Finance / Corporate Planning.** The per-cell economic-burden proxy is
+  computed; a network-wide sum across ranked cells remains a useful, still-
+  uncomputed extension (carried from Entry 3).
+
+### C. Envoy Air and PSA Airlines notes
+
+- **Envoy:** the favorable finding should be stated as plainly as any unfavorable
+  one. Envoy-operated cells are *under*-represented among the most fragile
+  combinations at every cutoff, with the lowest mean fragility score of the five
+  operator classes. On DFW–LFT specifically, Envoy service ranks #1,060 of 1,668
+  (benign) where the PSA-operated cell ranks #63. This is material context that
+  prevents the overall pattern from being misread as anti-regional.
+- **PSA:** PSA-operated cells are over-represented ~4× in the worst 5%, with a
+  cascade-dominated signature at ORD/DFW/DCA spokes. Stated as association, not
+  fault: the schedule and routing PSA flies are designed upstream by American.
+  The appropriate posture in any outreach is good-faith disclosure and an
+  invitation to check the public-data result against internal records.
+
+### Open items / caveats to carry into any final read-out
+
+- **Operator ambiguity rose to 904,924 flights (14.7%)** at 9-hub scale (was
+  ~485K) and is excluded from operator comparisons, including the rank-1 cell
+  (ORD–SPI) and 12 of the worst-83 cells. The $100 FlightAware Standard tier would
+  resolve these and allow naming the rank-1 operator; it does **not** change the
+  established direction and is therefore optional (full analysis in the findings
+  guide §7). The conservative exclusion is a defensibility asset.
+- **Hub totals are run-mode-dependent** (origin-priority attribution); do not
+  compare DFW/ORD raw counts across run modes. Cell rankings are unaffected.
+- All Entry 1–3 caveats persist: self-reported BTS cause codes, no internal
+  records, proxy economics, mix effects, small-sample cells, association not
+  causation.

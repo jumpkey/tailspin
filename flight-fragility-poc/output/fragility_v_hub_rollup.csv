@@ -1,4 +1,6 @@
 hub_family,hotspot_count,total_flights_in_top_n,share_of_top_n
-DFW,10,10119,0.5
-ORD,9,7051,0.45
-PHL,1,706,0.05
+DFW,8,8305,0.4
+ORD,8,5791,0.4
+DCA,2,4344,0.1
+CLT,1,120,0.05
+MIA,1,187,0.05

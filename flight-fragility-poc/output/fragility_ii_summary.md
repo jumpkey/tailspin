@@ -6,17 +6,17 @@ This summary reports whether the public-data signature of controllable (Air Carr
 
 | Weather | AA controllable severe-delay rate (n) | Peer-avg (n) | Combined-peer (n) | AA÷peer-avg | AA÷combined-peer |
 |---|---|---|---|---|---|
-| Benign | 2.86% (14266) | 3.81% | 3.51% (8697) | 0.75x | 0.81x |
-| Marginal | 3.18% (1980) | 6.02% | 4.52% (1461) | 0.53x | 0.7x |
-| Adverse | 4.65% (1183) | 6.35% | 4.87% (904) | 0.73x (provisional) | 0.95x (provisional) |
+| Benign | 2.60% (14266) | 3.46% | 3.20% (8697) | 0.75x | 0.81x |
+| Marginal | 3.08% (1980) | 5.98% | 4.45% (1461) | 0.52x | 0.69x |
+| Adverse | 4.48% (1183) | 6.08% | 4.76% (904) | 0.74x (provisional) | 0.94x (provisional) |
 
 | Weather | AA late-arriving severe-delay rate (n) | Peer-avg (n) | Combined-peer (n) | AA÷peer-avg | AA÷combined-peer |
 |---|---|---|---|---|---|
-| Benign | 4.43% (14266) | 2.55% | 2.22% (8697) | 1.74x | 2.0x |
-| Marginal | 5.40% (1980) | 4.20% | 3.49% (1461) | 1.28x | 1.55x |
-| Adverse | 8.11% (1183) | 5.48% | 5.31% (904) | 1.48x (provisional) | 1.53x (provisional) |
+| Benign | 3.99% (14266) | 2.10% | 1.79% (8697) | 1.9x | 2.23x |
+| Marginal | 4.80% (1980) | 3.80% | 3.08% (1461) | 1.26x | 1.56x |
+| Adverse | 7.78% (1183) | 5.08% | 4.98% (904) | 1.53x (provisional) | 1.56x (provisional) |
 
-Benign-to-adverse escalation in the late-arriving (cascade) severe-delay rate: AA regional 1.83x, combined peer basket 2.39x.
+Benign-to-adverse escalation in the late-arriving (cascade) severe-delay rate: AA regional 1.95x, combined peer basket 2.78x.
 
 ## 4. Cause-data caveat
 
@@ -42,27 +42,27 @@ BTS's `Reporting_Airline` field (`carrier_code` in the fact table) is the carrie
 
 | Operator | Weather | Operated (n) | Controllable severe-delay rate | Late-arriving (cascade) severe-delay rate | Controllable cancel rate |
 |---|---|---|---|---|---|
-| Envoy Air (MQ) | Benign | 6021 | 1.48% | 3.82% | 0.10% |
-| Envoy Air (MQ) | Marginal | 814 | 2.21% | 5.41% | 0.00% |
-| Envoy Air (MQ) | Adverse | 483 | 2.28% | 9.73% | 0.19% |
-| PSA Airlines (OH) | Benign | 4172 | 2.54% | 8.60% | 0.54% |
-| PSA Airlines (OH) | Marginal | 559 | 2.86% | 10.38% | 0.99% |
+| Envoy Air (MQ) | Benign | 6021 | 1.33% | 3.39% | 0.10% |
+| Envoy Air (MQ) | Marginal | 814 | 2.21% | 4.91% | 0.00% |
+| Envoy Air (MQ) | Adverse | 483 | 1.86% | 8.90% | 0.19% |
+| PSA Airlines (OH) | Benign | 4172 | 2.35% | 7.81% | 0.54% |
+| PSA Airlines (OH) | Marginal | 559 | 2.68% | 8.94% | 0.99% |
 | PSA Airlines (OH) | Adverse | 396 | 4.29% | 11.36% | 0.00% |
-| SkyWest (OO) | Benign | 4073 | 5.23% | 1.06% | 0.00% |
-| SkyWest (OO) | Marginal | 607 | 4.78% | 0.82% | 0.00% |
+| SkyWest (OO) | Benign | 4073 | 4.74% | 0.96% | 0.00% |
+| SkyWest (OO) | Marginal | 607 | 4.61% | 0.82% | 0.00% |
 | SkyWest (OO) | Adverse | 304 | 8.88% | 1.32% | 0.29% |
 
 **dl_peer_basket**
 
 | Operator | Weather | Operated (n) | Controllable severe-delay rate | Late-arriving (cascade) severe-delay rate | Controllable cancel rate |
 |---|---|---|---|---|---|
-| Endeavor Air (9E) | Benign | 1953 | 1.69% | 2.36% | 0.56% |
-| Endeavor Air (9E) | Marginal | 337 | 1.78% | 2.97% | 0.85% |
-| Endeavor Air (9E) | Adverse | 193 | 2.59% | 8.81% | 0.99% |
-| Delta mainline (DL) | Benign | 3282 | 1.80% | 2.68% | 0.72% |
-| Delta mainline (DL) | Marginal | 575 | 3.13% | 4.70% | 1.02% |
+| Endeavor Air (9E) | Benign | 1953 | 1.43% | 2.15% | 0.56% |
+| Endeavor Air (9E) | Marginal | 337 | 1.48% | 2.97% | 0.85% |
+| Endeavor Air (9E) | Adverse | 193 | 2.59% | 7.77% | 0.99% |
+| Delta mainline (DL) | Benign | 3282 | 1.68% | 1.95% | 0.72% |
+| Delta mainline (DL) | Marginal | 575 | 3.13% | 3.83% | 1.02% |
 | Delta mainline (DL) | Adverse | 365 | 1.64% | 5.48% | 1.84% |
-| SkyWest (OO) | Benign | 1577 | 8.31% | 0.00% | 0.06% |
+| SkyWest (OO) | Benign | 1577 | 7.67% | 0.00% | 0.06% |
 | SkyWest (OO) | Marginal | 286 | 6.99% | 0.00% | 0.00% |
 | SkyWest (OO) | Adverse | 155 | 10.32% | 0.00% | 0.60% |
 
@@ -70,9 +70,9 @@ BTS's `Reporting_Airline` field (`carrier_code` in the fact table) is the carrie
 
 | Operator | Weather | Operated (n) | Controllable severe-delay rate | Late-arriving (cascade) severe-delay rate | Controllable cancel rate |
 |---|---|---|---|---|---|
-| SkyWest (OO) | Benign | 1883 | 4.35% | 3.13% | 0.00% |
-| SkyWest (OO) | Marginal | 263 | 8.37% | 5.32% | 0.00% |
-| SkyWest (OO) | Adverse | 190 | 8.95% | 5.79% | 0.00% |
+| SkyWest (OO) | Benign | 1883 | 3.93% | 2.66% | 0.00% |
+| SkyWest (OO) | Marginal | 263 | 8.37% | 4.94% | 0.00% |
+| SkyWest (OO) | Adverse | 190 | 8.42% | 5.26% | 0.00% |
 | United mainline (UA) | Benign | 2 * | 0.00% | 0.00% | 0.00% |
 | United mainline (UA) | Adverse | 1 * | 0.00% | 0.00% | 0.00% |
 

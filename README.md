@@ -62,6 +62,7 @@ section):**
 - Engineering reference: [flight-fragility-poc/README.md](flight-fragility-poc/README.md) ·
   After-action history: [AAR.md](flight-fragility-poc/AAR.md) ·
   Server run guide: [FRANKENSERVER.md](flight-fragility-poc/FRANKENSERVER.md)
+- Design specs (Fragility I–V): [flight-fragility-poc/spec/](flight-fragility-poc/spec/)
 
 **Quick start:**
 ```bash
@@ -76,12 +77,5 @@ for scope controls.
 
 ---
 
-## Specifications
-
-Design specs for each analytical pass (root level):
-
-- [flight_fragility_poc_spec.md](flight_fragility_poc_spec.md) — Fragility I (focal corridor)
-- [flight_fragility_ii_machine_addon_spec.md](flight_fragility_ii_machine_addon_spec.md) — Fragility II (controllable / cascade)
-- [flight_fragility_iii_show_me_the_money_addon_spec.md](flight_fragility_iii_show_me_the_money_addon_spec.md) — Fragility III (economic burden)
-- [flight_fragility_iv_operator_attribution_spec.md](flight_fragility_iv_operator_attribution_spec.md) — Fragility IV (operator attribution + hub-spoke)
-- [flight_fragility_v_network_hotspot_spec.md](flight_fragility_v_network_hotspot_spec.md) — Fragility V (network hotspot engine)
+Design specifications are project-scoped and live with each project (e.g.
+[flight-fragility-poc/spec/](flight-fragility-poc/spec/)).

@@ -10,6 +10,16 @@ schedule fragility than comparable peer markets.
 > on a high-memory server. That guide is the top-level read-out; this README
 > remains the engineering/method reference.
 
+## Specifications
+
+Design specs for each analytical pass live in [`spec/`](spec/):
+
+- [Fragility I — focal corridor](spec/flight_fragility_poc_spec.md)
+- [Fragility II — controllable / cascade disruption](spec/flight_fragility_ii_machine_addon_spec.md)
+- [Fragility III — economic burden](spec/flight_fragility_iii_show_me_the_money_addon_spec.md)
+- [Fragility IV — operator attribution + hub-spoke expansion](spec/flight_fragility_iv_operator_attribution_spec.md)
+- [Fragility V — network hotspot engine](spec/flight_fragility_v_network_hotspot_spec.md)
+
 ## Business question
 
 > Does AA regional service in LFT and nearby small-spoke markets show a larger

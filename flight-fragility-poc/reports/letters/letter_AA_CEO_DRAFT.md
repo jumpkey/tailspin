@@ -17,13 +17,25 @@ Chief Executive Officer, American Airlines Group
 Dear [Name],
 
 I am a frequent American customer. I am also someone who works with data, and I
-recently spent about an hour doing something I think should give you pause: using
+recently spent a few days doing something I think should give you pause: using
 only public records, I mapped schedule reliability across American's entire hub
 network and found where cancellations and cascading delays concentrate — down to
 specific routes and operators.
 
+Respectfully, I am a very longstanding loyal Platinum Pro (formerly Executive Platinum) 
+frequent flyer who travels nearly exclusively on American Airlines. I specifically
+choose American because, as I put it to friends who ask, "American out of all the other carriers
+seems to operate the most disciplined schedule." 
+
+Recent events have given me cause to reconsider that assessment, and, I am sorry to say, 
+my commitment, as the turmoil on my particular route (LFT-DFW onwards) has become unsustainable.
+
+The last event was bad enough to make me wonder why my route suffers more than I recall
+in the past due to bad weather. Needless to say, by the presence of this letter, you 
+can see that I found the answers I was seeking. I share them with you here.
+
 I am writing to you, rather than only to your operating teams, because the most
-important finding is not any single route. **It is that this was possible at all,
+important finding is not any single route. **It is that this study was possible at all,
 from the outside, with free public data.**
 
 **What I'd want to know if I sat in your chair:**
@@ -52,10 +64,12 @@ from the outside, with free public data.**
 > do.
 
 I'll make this concrete with one corridor I know personally: DFW–Lafayette. When
-the weather turns, its schedule comes apart — and depending on which of three
-rotating regional carriers happens to be flying it that month, a passenger's odds
-of a cancellation or a long delay swing widely. That is one small corridor. The
-network pattern says it is not unusual.
+the weather turns, its schedule comes apart — and which of three regional carriers
+is flying it has rotated month to month, so a passenger's odds of a cancellation or
+a long delay swing widely. Through the most recent public data (early 2026) the
+route is now flown almost entirely by PSA — the least reliable of the three in any
+weather — and a season-matched comparison shows the problem has not eased. That is
+one small corridor. The network pattern says it is not unusual.
 
 **What I am asking you to do:** simply to look — to have someone confirm whether
 this is already on your radar and, if not, why a public-data analysis surfaced it

@@ -24,9 +24,10 @@ on-time records and want to share it with you directly, in fairness, before it
 informs any wider conversation.
 
 The analysis covers **6.15 million flights** across American's nine hubs and 255
-spoke airports over the 24 months ending December 2025, scoring route-operator
-combinations on cancellation and cascading-delay risk. It uses only public data
-(BTS On-Time Performance and NOAA weather) and is fully reproducible.
+spoke airports over the 24 months ending December 2025 (with a season-matched check
+into the published 2026 months), scoring route-operator combinations on
+cancellation and cascading-delay risk. It uses only public data (BTS On-Time
+Performance and NOAA weather) and is fully reproducible.
 
 I want to be transparent about both the method and its limits. It is an
 **associational** study of public outcomes — it does not diagnose cause, and it
@@ -42,17 +43,20 @@ PSA-operated cells are over-represented among the network's most fragile route-
 operator combinations — roughly four times PSA's share of flights, in the worst
 5% of cells — with a signature dominated by *cascading* (late-inbound-aircraft)
 delay at thin spokes feeding ORD, DFW, and DCA. One corridor I know personally,
-DFW–Lafayette, ranks in the worst ~4% of the network when PSA-operated. I raise
-this not to assign blame — the schedule and aircraft routing you fly are designed
-upstream — but because the pattern is consistent and public, and you would
-presumably rather see it first than hear about it later.
+DFW–Lafayette, ranks in the worst ~4% of the network when PSA-operated — and PSA
+now flies roughly 90% of it (up from ~40% in 2024), with a season-matched check
+showing the pattern persisting into the published 2026 months. I raise this not to
+assign blame — the schedule and aircraft routing you fly are designed upstream —
+but because the pattern is consistent and public, and you would presumably rather
+see it first than hear about it later.
 
 **[Envoy-specific paragraph — use when addressing Envoy]**
 In fairness, the data shows Envoy-operated cells *under*-represented among the
 most fragile combinations — below Envoy's share of flights at every cutoff, with
 a markedly lower average fragility score than the other wholly-owned regional. On
 the DFW–Lafayette corridor, for example, Envoy service is unremarkable where
-another operator's is not. I include this because an honest analysis reports the
+another operator's is not (Envoy has, in fact, largely handed that corridor to PSA
+since late 2025). I include this because an honest analysis reports the
 favorable findings as plainly as the unfavorable ones, and because it is relevant
 context for how the overall pattern should — and should not — be read.
 

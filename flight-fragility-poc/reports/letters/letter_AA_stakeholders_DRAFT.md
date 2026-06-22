@@ -22,9 +22,10 @@ your attention, and to ask a straightforward question.
 Using only public records — the U.S. DOT Bureau of Transportation Statistics
 On-Time Performance database and NOAA weather observations — I analyzed
 **6.15 million flights** across American's **nine hubs** and 255 connected
-airports over the 24 months ending December 2025. The goal was modest: to map
-where schedule fragility — cancellations and cascading "knock-on" delays —
-concentrates across the network.
+airports over the 24 months ending December 2025, with a season-matched check
+extending into the published 2026 months. The goal was modest: to map where
+schedule fragility — cancellations and cascading "knock-on" delays — concentrates
+across the network.
 
 Three results, stated carefully:
 
@@ -52,9 +53,11 @@ other — so this is not a "regional flying is worse" claim. It is specific to
 particular operating structures within your branded product.
 
 One corridor I know firsthand — DFW–Lafayette (LFT) — illustrates the pattern.
-When operated by one carrier it ranks in the **worst ~4%** of the entire 1,668-
-cell network on the cascade signature; operated by another carrier on the same
-route, it is unremarkable. The lived experience and the public data agree.
+When PSA-operated it ranks in the **worst ~4%** of the entire 1,668-cell network on
+the cascade signature; the same route flown by Envoy is unremarkable. The corridor
+has rotated among regional operators but is now roughly 90% PSA-operated, and a
+season-matched check shows the problem persisting into the published 2026 months.
+The lived experience and the public data agree.
 
 My question is simple and asked in good faith:
 

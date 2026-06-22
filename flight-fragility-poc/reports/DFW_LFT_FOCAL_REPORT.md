@@ -74,12 +74,15 @@ To compare fairly, 2026 (January–April, partial year) is measured against the
 **same months** of 2024–2025 — removing the winter-weather bias that would
 otherwise inflate 2026.
 
-- **The corridor got modestly worse, season-matched.** DFW–LFT flights cancelled
-  or badly delayed: roughly flat-to-up, with **knock-on (late-inbound-aircraft)
-  delays rising ~39%**.
-- **PSA's bad-weather cancellations on DFW–LFT roughly doubled** (≈11% → ≈24%).
-  *Caveat: only ~51 adverse-weather flights in the 2026 window — directional, not
-  precise.*
+- **The corridor got worse — mainly because of who flies it now.** Corridor-wide
+  disruption rose 15.1% → 16.8% (season-matched). But **PSA on its own barely
+  changed** (17.1% → 17.7%): the corridor worsened chiefly because it **shifted to
+  PSA**, its least-reliable operator, from 42% to **89%** of flights. More of your
+  flights are now on the worst performer — that, more than any single operator
+  declining, is why the experience degraded.
+- **Knock-on (late-inbound-aircraft) delays rose ~39%** corridor-wide, and **PSA's
+  bad-weather cancellations roughly doubled** (≈11% → ≈24%). *Caveat: only ~51
+  adverse-weather PSA flights in the 2026 window — directional, not precise.*
 - **Network-wide, the pattern persisted** (see §4): PSA remained the worst-
   performing operator and worsened even season-matched; Envoy remained the best
   and stable.

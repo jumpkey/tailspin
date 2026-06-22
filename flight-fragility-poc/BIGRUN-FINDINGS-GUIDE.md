@@ -280,7 +280,7 @@ prerequisite gating and a stable log symlink.
 
 | If you want… | Read |
 |---|---|
-| **Executive charts (the visual punch)** | **`output/exec/` — A1–A3 (corridor), B1–B2 (network)** |
+| **Executive charts (the visual punch)** | **`output/exec/` — A1 (absolute), A1b (weather sensitivity), A2–A3 (corridor), B1–B2 (network)** |
 | **The DFW–LFT single-corridor case study** | **[reports/DFW_LFT_FOCAL_REPORT.md](reports/DFW_LFT_FOCAL_REPORT.md)** |
 | The formal network write-up framing | [reports/FRAGILITY_NETWORK_REPORT_DRAFT.md](reports/FRAGILITY_NETWORK_REPORT_DRAFT.md) |
 | Plain-language exec chart specs (awaiting approval) | [reports/CHART_SPECS_DRAFT.md](reports/CHART_SPECS_DRAFT.md) |

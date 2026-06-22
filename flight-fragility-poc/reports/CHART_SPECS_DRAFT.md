@@ -1,5 +1,13 @@
 # Executive Chart Specs — Plain-Language Redesign (DRAFT for approval)
 
+> **Render status (rendered to `output/exec/`):** A1 was split after review — A1 now
+> shows **absolute** disruption only ("PSA least reliable in any weather"), and a new
+> **A1b** isolates **weather sensitivity** (good→bad dumbbell + each operator's own
+> multiplier) so absolute level and relative swing are never conflated. A3 was
+> revised to show **Corridor vs PSA-only** side by side, attributing the corridor's
+> 2026 decline to the operator **mix shift** (42%→89% PSA) rather than a single
+> operator declining. Set is now A1, A1b, A2, A3, B1, B2.
+
 **Purpose.** Replace the current jargon-dense charts with a small set where
 **each chart carries exactly one sentence of meaning**, readable by a
 non-technical executive in under ten seconds. No data-science vocabulary appears

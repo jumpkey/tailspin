@@ -83,16 +83,56 @@ def chart_A1():
     ax.set_xticks(x); ax.set_xticklabels([WX_LABEL[b] for b in wx])
     ax.yaxis.set_major_formatter(PercentFormatter(1.0))
     ax.set_ylabel("Flights cancelled or delayed 1+ hour")
-    ax.set_title("When the weather turns, the DFW-Lafayette schedule breaks", pad=16, fontsize=18)
+    ax.set_title("On DFW-Lafayette, PSA is the least reliable in any weather", pad=16, fontsize=18)
     ax.legend(loc="upper left", frameon=False, fontsize=12)
     ax.set_ylim(0, max(0.45, ax.get_ylim()[1]))
-    ax.annotate("Envoy degrades most\nin bad weather (~4x)", xy=(2.0,0.30), xytext=(1.05,0.40),
-                fontsize=11, color=C_ENVOY, ha="center",
-                arrowprops=dict(arrowstyle="->",color=C_ENVOY))
-    ax.text(0.99,0.97,"DFW-Lafayette, 2024-2025", transform=ax.transAxes, ha="right", va="top",
-            fontsize=11, style="italic", color="#555")
+    ax.text(0.5,1.005,"Share of flights cancelled or delayed 1+ hour, by weather condition (2024-2025).  "
+            "Bad weather makes every operator 2-4x worse.",
+            transform=ax.transAxes, ha="center", va="bottom", fontsize=10.5, style="italic", color="#555")
     footer(fig); fig.tight_layout(rect=[0,0.04,1,1])
     fig.savefig(OUT/"A1_weather_breaks_schedule.png"); plt.close(fig)
+
+
+def chart_A1b():
+    """Weather sensitivity, shown honestly: absolute good->bad endpoints (dumbbell)
+    plus each operator's own multiplier. Resolves the A1 confusion: PSA is worst in
+    absolute terms in any weather; Envoy's relative swing is largest only because its
+    good-weather baseline is the lowest."""
+    df = con.sql(f"""
+      WITH t AS (SELECT operator_class, weather_bucket, {disruption_expr()} r
+        FROM read_parquet('{CARVE}', hive_partitioning=1)
+        WHERE hub_family='DFW' AND (origin='LFT' OR dest='LFT') AND period_flag='baseline'
+          AND weather_bucket IN ('benign','adverse')
+          AND operator_class IN ('PSA_operated','Envoy_operated','SkyWest_unresolved') GROUP BY 1,2)
+      SELECT operator_class,
+        max(CASE WHEN weather_bucket='benign' THEN r END) good,
+        max(CASE WHEN weather_bucket='adverse' THEN r END) bad
+      FROM t GROUP BY 1
+    """).df()
+    df["mult"]=df["bad"]/df["good"]
+    df=df.sort_values("mult", ascending=True).reset_index(drop=True)  # bottom-up; biggest swing on top
+    fig, ax = plt.subplots(figsize=(12,6.2))
+    import numpy as np
+    for i,row in df.iterrows():
+        ax.plot([row.good,row.bad],[i,i], color="#BBB", lw=4, zorder=1)
+        ax.scatter([row.good],[i], s=240, color=C_FLT, zorder=2, edgecolor="white")
+        ax.scatter([row.bad],[i], s=240, color=C_BAD, zorder=2, edgecolor="white")
+        ax.text(row.good-0.012, i, f"{row.good*100:.0f}%", va="center", ha="right", fontsize=12, color="#555")
+        ax.text(row.bad+0.012, i, f"{row.bad*100:.0f}%", va="center", ha="left", fontsize=12, fontweight="bold", color=C_BAD)
+        ax.text(0.445, i, f"x{row.mult:.1f}", va="center", ha="left", fontsize=13, fontweight="bold", color="#333")
+    ax.set_yticks(range(len(df))); ax.set_yticklabels([OP_LABEL[o].replace("\n"," ") for o in df.operator_class], fontsize=13)
+    ax.set_xlim(0,0.50); ax.set_ylim(-0.6,len(df)-0.4)
+    ax.xaxis.set_major_formatter(PercentFormatter(1.0))
+    ax.set_xlabel("Flights cancelled or delayed 1+ hour")
+    ax.set_title("Weather hits every operator hard - Envoy's reliability swings the most", pad=22, fontsize=17)
+    # legend dots
+    ax.scatter([],[],s=180,color=C_FLT,label="Good weather"); ax.scatter([],[],s=180,color=C_BAD,label="Bad weather")
+    ax.legend(loc="lower right", frameon=False, fontsize=12)
+    ax.text(0.5,1.012,"Dots = absolute rates.  \"x\" = bad-weather rate / the same operator's good-weather rate "
+            "(PSA worst in any weather; Envoy swings most from a low base).",
+            transform=ax.transAxes, ha="center", va="bottom", fontsize=9.5, style="italic", color="#555")
+    footer(fig); fig.tight_layout(rect=[0,0.04,1,1])
+    fig.savefig(OUT/"A1b_weather_sensitivity.png"); plt.close(fig)
 
 
 def chart_A2():
@@ -124,27 +164,32 @@ def chart_A2():
 
 
 def chart_A3():
-    df = con.sql(f"""
-      SELECT CASE WHEN year(flight_date)=2026 THEN '2026' ELSE '2024-2025' END season,
-             {disruption_expr()} rate, count(*) n
-      FROM read_parquet('{CARVE}', hive_partitioning=1)
-      WHERE hub_family='DFW' AND (origin='LFT' OR dest='LFT')
-        AND month(flight_date) BETWEEN 1 AND 4
-      GROUP BY 1
-    """).df().set_index("season")
-    order=["2024-2025","2026"]
-    vals=[float(df.loc[s,"rate"]) for s in order]; ns=[int(df.loc[s,"n"]) for s in order]
-    fig, ax = plt.subplots(figsize=(8.5,6.6))
-    bars=ax.bar(order, vals, color=[C_PRIOR,C_NOW], width=0.55)
-    for b,v,nn in zip(bars,vals,ns):
-        ax.text(b.get_x()+b.get_width()/2, v+0.004, f"{v*100:.1f}%", ha="center", fontsize=15, fontweight="bold")
-        ax.text(b.get_x()+b.get_width()/2, 0.004, f"{nn:,} flights", ha="center", fontsize=10, color="white", va="bottom")
+    base=f"""FROM read_parquet('{CARVE}', hive_partitioning=1)
+      WHERE hub_family='DFW' AND (origin='LFT' OR dest='LFT') AND month(flight_date) BETWEEN 1 AND 4"""
+    yr="CASE WHEN year(flight_date)=2026 THEN '2026' ELSE '2024-2025' END"
+    corr = con.sql(f"SELECT {yr} s, {disruption_expr()} r, count(*) n {base} GROUP BY 1").df().set_index("s")
+    psa  = con.sql(f"SELECT {yr} s, {disruption_expr()} r, count(*) n {base} AND operator_class='PSA_operated' GROUP BY 1").df().set_index("s")
+    import numpy as np
+    cats=["Corridor\n(all operators)","PSA only"]
+    prior=[float(corr.loc['2024-2025','r']), float(psa.loc['2024-2025','r'])]
+    now  =[float(corr.loc['2026','r']),      float(psa.loc['2026','r'])]
+    x=np.arange(len(cats)); w=0.36
+    fig, ax = plt.subplots(figsize=(10,6.6))
+    b1=ax.bar(x-w/2, prior, w, label="Jan-Apr 2024-2025", color=C_PRIOR)
+    b2=ax.bar(x+w/2, now,   w, label="Jan-Apr 2026",      color=C_NOW)
+    for bars in (b1,b2):
+        for b in bars:
+            ax.text(b.get_x()+b.get_width()/2, b.get_height()+0.004, f"{b.get_height()*100:.1f}%",
+                    ha="center", fontsize=13, fontweight="bold")
+    ax.set_xticks(x); ax.set_xticklabels(cats, fontsize=13)
     ax.yaxis.set_major_formatter(PercentFormatter(1.0))
     ax.set_ylabel("Flights cancelled or delayed 1+ hour")
-    ax.set_title("Is 2026 any better? No.", pad=16)
-    ax.set_ylim(0, max(vals)*1.35)
-    ax.text(0.5,0.99,"DFW-Lafayette, same months (Jan-Apr) compared",
-            transform=ax.transAxes, ha="center", va="top", fontsize=11, style="italic", color="#555")
+    ax.set_title("Is 2026 any better? No - and here's why", pad=16, fontsize=18)
+    ax.set_ylim(0, max(now+prior)*1.35)
+    ax.legend(loc="upper left", frameon=False, fontsize=12)
+    ax.text(0.5,1.005,"Same months compared. PSA itself barely changed - but the corridor shifted to PSA "
+            "(its least-reliable operator) from 42% to 89% of flights.",
+            transform=ax.transAxes, ha="center", va="bottom", fontsize=10, style="italic", color="#555")
     footer(fig); fig.tight_layout(rect=[0,0.04,1,1])
     fig.savefig(OUT/"A3_is_2026_better.png"); plt.close(fig)
 
@@ -206,7 +251,7 @@ def chart_B2():
 
 
 if __name__ == "__main__":
-    chart_A1(); chart_A2(); chart_A3(); chart_B1(); chart_B2()
+    chart_A1(); chart_A1b(); chart_A2(); chart_A3(); chart_B1(); chart_B2()
     print("Rendered to", OUT)
     for p in sorted(OUT.glob("*.png")):
         print("  ", p.name, f"({p.stat().st_size//1024} KB)")

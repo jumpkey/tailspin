@@ -1,0 +1,2 @@
+# Python virtual environment (repo-root; regenerable via pip install -r flight-fragility-poc/requirements.txt)
+.venv/
